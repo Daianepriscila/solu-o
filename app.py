@@ -1,53 +1,63 @@
 import streamlit as st
-import xml.etree.ElementTree as ET
+import xml.etree.Tree as ET
 from fpdf import FPDF
 from datetime import datetime
 
-# --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Amare Italinea - Auditoria Master", page_icon="🏢", layout="wide")
+# --- CONFIGURAÇÃO ---
+st.set_page_config(page_title="Amare Italinea - Auditoria Master", layout="wide")
 
-# --- BANCO DE DADOS DE USUÁRIOS ---
-USUARIOS = {
-    "michel_conferente": "italinea123",
-    "matheus_conferente": "italinea456",
-    "douglas_conferente": "italinea789",
-    "admin": "adminamare"
-}
+# --- USUÁRIOS ---
+USUARIOS = {"michel_conferente": "italinea123", "matheus_conferente": "italinea456", "douglas_conferente": "italinea789", "admin": "adminamare"}
 
-# --- FUNÇÃO DE AUDITORIA INTELIGENTE (TOLERÂNCIA 20mm) ---
+# --- FUNÇÃO DE AUDITORIA INTELIGENTE ---
 def analisar_divergencias(venda_file, conf_file):
     def extrair(file):
         tree = ET.parse(file)
         root = tree.getroot()
         itens = {}
         pe_direito = 0
+        parede_total = 0
+        hidraulica_esgoto = 0 # Simulação de pontos captados via XML
         for i in root.iter('Item'):
             nome = i.get('Description', 'Módulo')
             larg = float(i.get('Width', 0))
             alt = float(i.get('Height', 0))
             itens[nome] = {'L': larg, 'A': alt}
-            if "PAREDE" in nome.upper() or "DIREITO" in nome.upper():
-                pe_direito = alt
-        return itens, pe_direito
+            
+            # Captura Pé-Direito e Medida Total de Parede
+            if "DIREITO" in nome.upper(): pe_direito = alt
+            if "PAREDE" in nome.upper(): parede_total += larg
+            if "PONTO" in nome.upper(): hidraulica_esgoto += larg # Exemplo de ponto de infra
+            
+        return itens, pe_direito, parede_total, hidraulica_esgoto
 
-    v_itens, v_pe = extrair(venda_file)
-    c_itens, c_pe = extrair(conf_file)
+    v_itens, v_pe, v_par, v_hid = extrair(venda_file)
+    c_itens, c_pe, c_par, c_hid = extrair(conf_file)
     alertas = []
 
-    # 1. Comparar Pé-Direito (Tolerância Estrita de 20mm)
-    dif_pe = abs(v_pe - c_pe)
-    if dif_pe > 20 and v_pe > 0:
-        alertas.append(f"🚨 PÉ-DIREITO: Variação de {dif_pe}mm detectada (Venda: {v_pe}mm | Técnico: {c_pe}mm). Justifique a mudança:")
+    # 1. Alerta de Parede e Infraestrutura (Tolerância 150mm / 15cm)
+    dif_par = abs(v_par - c_par)
+    if dif_par >= 150 and v_par > 0:
+        alertas.append(f"🧱 PAREDE: Diferença CRÍTICA de {dif_par}mm na largura da parede (Venda: {v_par}mm | Real: {c_par}mm).")
 
-    # 2. Comparar Módulos (Tolerância Estrita de 20mm)
+    dif_hid = abs(v_hid - c_hid)
+    if dif_hid >= 150 and v_hid > 0:
+        alertas.append(f"💧 INFRAESTRUTURA: Diferença de {dif_hid}mm detectada em pontos de Hidráulica/Esgoto.")
+
+    # 2. Alerta de Pé-Direito (Tolerância 20mm e Aviso de 15cm)
+    dif_pe = abs(v_pe - c_pe)
+    if dif_pe >= 150:
+        alertas.append(f"🚨 PÉ-DIREITO CRÍTICO: Diferença maior que 15cm detectada ({dif_pe}mm). Verifique o gesso/laje!")
+    elif dif_pe > 20 and v_pe > 0:
+        alertas.append(f"🚨 PÉ-DIREITO: Variação de {dif_pe}mm detectada. Justifique o desnível:")
+
+    # 3. Alerta de Módulos (Tolerância 20mm)
     for nome, info in v_itens.items():
         if nome in c_itens:
             dif_l = abs(info['L'] - c_itens[nome]['L'])
             if dif_l > 20:
-                alertas.append(f"📏 MEDIDA: Módulo '{nome}' alterado em {dif_l}mm. Isso afeta o vão de eletros ou cubas?")
-        elif "PAREDE" not in nome.upper():
-            alertas.append(f"❓ REMOÇÃO: O item '{nome}' sumiu no projeto técnico. Foi acordado com o cliente?")
-
+                alertas.append(f"📏 MÓDULO: '{nome}' alterado em {dif_l}mm. O vão de eletros foi conferido?")
+    
     return alertas
 
 # --- SISTEMA DE LOGIN ---
@@ -55,86 +65,93 @@ if "logado" not in st.session_state: st.session_state["logado"] = False
 
 if not st.session_state["logado"]:
     st.title("🛡️ Amare Italinea - Portal de Auditoria")
-    st.info("Acesso Restrito. Faça o login para continuar.")
     u = st.sidebar.text_input("Usuário").lower()
     p = st.sidebar.text_input("Senha", type="password")
     if st.sidebar.button("Entrar"):
         if u in USUARIOS and USUARIOS[u] == p:
             st.session_state["logado"], st.session_state["nome_usuario"] = True, u
             st.rerun()
-        else: st.sidebar.error("Usuário ou senha incorretos")
+        else: st.sidebar.error("Acesso Negado")
 else:
-    # Interface Principal após Login
-    st.title(f"🕵️ Auditoria Master Amare: {st.session_state['nome_usuario']}")
-    if st.sidebar.button("Sair / Logout"):
+    st.title(f"🕵️ Auditoria Master: {st.session_state['nome_usuario']}")
+    if st.sidebar.button("Sair"):
         st.session_state["logado"] = False
         st.rerun()
 
-    tab1, tab2, tab3 = st.tabs(["📊 Auditoria XML (Inteligência)", "🏠 Engenharia de Campo", "🏁 Lacre de Produção"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 Análise XML", "🏠 Engenharia de Campo", "🔌 Eletros e Aparelhos", "🏁 Lacre Final"])
 
-    # --- TAB 1: A INTELIGÊNCIA ---
     with tab1:
-        st.header("1. Comparação Venda vs. Técnico (Tolerância 20mm)")
-        f_venda = st.file_uploader("Suba o XML da Venda", type=['xml'])
-        f_conf = st.file_uploader("Suba o XML da Conferência (Técnico)", type=['xml'])
+        st.header("1. Comparação Automática (Tolerância: Parede 15cm / Móvel 2cm)")
+        file_venda = st.file_uploader("XML Venda", type=['xml'])
+        file_conf = st.file_uploader("XML Conferência", type=['xml'])
 
         xml_validado = True
-        if f_venda and f_conf:
-            questoes = analisar_divergencias(f_venda, f_conf)
+        if file_venda and file_conf:
+            questoes = analisar_divergencias(file_venda, file_conf)
             if questoes:
-                st.error("🚨 O SISTEMA DETECTOU DIVERGÊNCIAS ACIMA DE 20mm:")
+                st.error("🚨 DIVERGÊNCIAS DETECTADAS NO PROJETO:")
                 respostas = []
                 for i, q in enumerate(questoes):
                     st.warning(q)
-                    res = st.text_area(f"Justificativa para item {i+1}:", key=f"ans_{i}")
+                    res = st.text_area(f"Justificativa Técnica para: {q[:30]}...", key=f"ans_{i}")
                     respostas.append(res)
-                
-                # Só valida se todas as justificativas tiverem texto
                 xml_validado = all([len(r) > 10 for r in respostas])
-                if not xml_validado:
-                    st.info("👉 Descreva o motivo técnico das mudanças acima para liberar o laudo.")
             else:
-                st.success("✅ Projeto técnico em total conformidade (Variação < 20mm).")
+                st.success("✅ Projeto em conformidade técnica.")
 
-    # --- TAB 2: CHECKLIST DE ENGENHARIA COMPLETO ---
     with tab2:
-        st.header("2. Detalhes Técnicos (O que o XML não vê)")
-        col_a, col_b = st.columns(2)
-        with col_a:
-            st.subheader("💧 Hidráulica, Gás e Pedras")
-            h1 = st.checkbox("Caixa de gordura, Registros e Filtro de água acessíveis?")
-            h2 = st.checkbox("Altura da bancada e Torneira permitem abertura da janela?")
-            h3 = st.checkbox("Ponto de Gás e Esgoto previstos dentro dos nichos?")
-            h4 = st.checkbox("LEDs: Perfil de LED e furação de passagem do cabo previstos?")
-        with col_b:
-            st.subheader("🛠️ Marcenaria e Sustentação")
-            m1 = st.checkbox("GUARNIÇÃO: Descontou batente da porta para abertura de gavetas?")
-            m2 = st.checkbox("PÉ-DIREITO (3 pontos): Verificou a queda de laje/gesso?")
-            m3 = st.checkbox("EMPENAMENTO: Prateleiras largas (>900mm) têm reforço/engrosso?")
-            m4 = st.checkbox("DIVISÓRIA: Ferragem da porta (oculta/aparente) confirmada?")
-            g1 = st.checkbox("ERGONOMIA: Bater cabeça, Eixo da TV e Manutenção do Ar?")
+        st.header("2. O Olhar do Especialista (Folha de Ofício)")
+        c1, c2 = st.columns(2)
+        with c1:
+            h1 = st.checkbox("Caixa de Gordura, Registros e Filtro de água acessíveis?")
+            h2 = st.checkbox("Altura da bancada permite abertura da janela/torneira?")
+            h3 = st.checkbox("Ponto de Gás e Esgoto previstos nos nichos?")
+            h4 = st.checkbox("LEDs: Perfil e furação de passagem de cabos previstos?")
+        with c2:
+            m1 = st.checkbox("GUARNIÇÃO: Gavetas e portas abrem sem bater no batente?")
+            m2 = st.checkbox("PÉ-DIREITO: Medido em 3 pontos p/ checar queda de laje?")
+            m3 = st.checkbox("EMPENAMENTO: Reforço em prateleiras largas (>900mm)?")
+            g1 = st.checkbox("ERGONOMIA: Bater cabeça, Eixo da TV e Filtro do Ar?")
 
-    # --- TAB 3: FINALIZAÇÃO ---
     with tab3:
-        st.header("3. Registro Final")
-        cliente = st.text_input("Nome do Cliente / Contrato")
-        foto = st.file_uploader("📷 FOTO OBRIGATÓRIA: Papel de Ofício (Medida Fina)", type=['jpg', 'png'])
+        st.header("3. Medidas de Eletros e Aparelhos")
+        st.info("Caso o cliente não possua o aparelho, preencha com 0.")
+        col_e1, col_e2, col_e3 = st.columns(3)
+        with col_e1:
+            geladeira = st.number_input("Largura Geladeira (mm)", value=0)
+            microondas = st.number_input("Largura Micro-ondas (mm)", value=0)
+            forno = st.number_input("Largura Forno (mm)", value=0)
+        with col_e2:
+            adega = st.number_input("Largura Adega (mm)", value=0)
+            cervejeira = st.number_input("Largura Cervejeira (mm)", value=0)
+            aquecedor = st.number_input("Largura Aquecedor de Água (mm)", value=0)
+        with col_e3:
+            st.write("**Instruções:**")
+            st.caption("Verifique se as medidas acima batem com os vãos deixados no projeto técnico.")
+
+    with tab4:
+        st.header("4. Registro e Geração de Laudo")
+        cliente = st.text_input("Cliente / Contrato")
+        foto = st.file_uploader("📷 Foto Obrigatória: Papel de Ofício (Medida Fina)", type=['jpg', 'png'])
         
-        if st.button("🚀 FINALIZAR E GERAR PDF"):
-            checks = [h1, h2, h3, h4, m1, m2, m3, m4, g1, foto, cliente]
-            if not all(checks):
-                st.error("❌ SISTEMA BLOQUEADO: Complete o checklist de engenharia e anexe a foto.")
-            elif not xml_validado:
-                st.error("❌ SISTEMA BLOQUEADO: Você precisa justificar as mudanças de medida no Passo 1.")
+        if st.button("🚀 FINALIZAR E GERAR PDF AMARE"):
+            if not cliente or not foto or not xml_validado:
+                st.error("❌ SISTEMA BLOQUEADO: Verifique se justificou as mudanças do XML e anexou a foto.")
+            elif not (h1 and h2 and h3 and h4 and m1 and m2 and m3 and g1):
+                st.error("❌ SISTEMA BLOQUEADO: Complete o checklist de engenharia.")
             else:
                 st.balloons()
-                st.success("Auditoria Amare Concluída com Sucesso!")
-                # Geração de PDF (Estrutura Básica)
                 pdf = FPDF()
                 pdf.add_page()
                 pdf.set_font("Arial", 'B', 16)
-                pdf.cell(0, 10, "AMARE ITALINEA - LAUDO DE CONFERÊNCIA TÉCNICA", ln=True, align='C')
+                pdf.cell(0, 10, "AMARE ITALINEA - LAUDO DE AUDITORIA", ln=True, align='C')
+                pdf.set_font("Arial", size=10)
+                pdf.ln(10)
+                pdf.cell(0, 10, f"Cliente: {cliente} | Data: {datetime.now().strftime('%d/%m/%Y')}", ln=True)
+                pdf.ln(5)
+                pdf.cell(0, 10, f"Eletros Informados - Geladeira: {geladeira}mm | Forno: {forno}mm", ln=True)
+                
                 pdf_name = f"Laudo_{cliente}.pdf"
                 pdf.output(pdf_name)
                 with open(pdf_name, "rb") as f:
-                    st.download_button("📥 BAIXAR LAUDO PARA FÁBRICA", f, file_name=pdf_name)
+                    st.download_button("📥 BAIXAR LAUDO", f, file_name=pdf_name)
