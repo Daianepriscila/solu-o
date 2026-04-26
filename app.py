@@ -4,7 +4,7 @@ from fpdf import FPDF
 from datetime import datetime
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Amare Italinea - Auditoria", page_icon="🏢", layout="wide")
+st.set_page_config(page_title="Amare Italinea - Auditoria Master", page_icon="🏢", layout="wide")
 
 # --- BANCO DE DADOS DE USUÁRIOS ---
 USUARIOS = {
@@ -14,7 +14,7 @@ USUARIOS = {
     "admin": "adminamare"
 }
 
-# --- FUNÇÃO PARA EXTRAIR DADOS DETALHADOS DO XML ---
+# --- FUNÇÃO DE AUDITORIA XML ---
 def extrair_dados_xml(file):
     if not file: return {}
     try:
@@ -44,7 +44,6 @@ def login():
         else:
             st.sidebar.error("Usuário ou senha incorretos")
 
-# --- INICIALIZAÇÃO DO ESTADO DE LOGIN ---
 if "logado" not in st.session_state:
     st.session_state["logado"] = False
 
@@ -53,7 +52,6 @@ if not st.session_state["logado"]:
     st.info("Sistema de Blindagem Pós-Venda. Faça o login para acessar.")
     login()
 else:
-    # Barra Lateral
     if st.sidebar.button("Sair / Logout"):
         st.session_state["logado"] = False
         st.rerun()
@@ -64,100 +62,119 @@ else:
 
     # --- ABAS DE TRABALHO ---
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📂 Projeto (XML)", 
-        "💧 Hidráulica/Gás", 
-        "⚡ Elétrica/Eletros", 
-        "🛠️ Engenharia/Ergonomia", 
-        "🏁 Finalização"
+        "📂 Auditoria XML", 
+        "💧 Hidráulica/Gás/Pedra", 
+        "⚡ Elétrica/Eletros/LED", 
+        "🏗️ Engenharia/Ergonomia", 
+        "🏁 Lacre Final"
     ])
 
     # --- TAB 1: CONFRONTO XML ---
     with tab1:
-        st.header("1. Comparativo Venda vs. Detalhamento Técnico")
+        st.header("1. Validação Projeto vs. Técnico")
         c1, c2 = st.columns(2)
-        f_venda = c1.file_uploader("XML da VENDA (O que o cliente comprou)", type=['xml'])
-        f_conf = c2.file_uploader("XML do DETALHAMENTO (O que vai para fábrica)", type=['xml'])
+        f_venda = c1.file_uploader("XML do Projeto de Venda", type=['xml'])
+        f_conf = c2.file_uploader("XML do Detalhamento Final (Medida Fina)", type=['xml'])
         
-        xml_confirmado = True
+        xml_ok = True
         if f_venda and f_conf:
             venda = extrair_dados_xml(f_venda)
             conf = extrair_dados_xml(f_conf)
-            st.subheader("🔍 Alertas de Alteração:")
+            st.subheader("🔍 Alertas de Auditoria:")
             for id_v, info in venda.items():
                 if id_v not in conf:
-                    st.error(f"❌ **SUMIU:** O módulo '{info['nome']}' foi removido do projeto técnico!")
-                    xml_confirmado = False
-                elif conf[id_v]['L'] != info['L']:
-                    st.warning(f"📏 **MEDIDA:** '{info['nome']}' mudou de {info['L']}mm para {conf[id_v]['L']}mm.")
+                    st.error(f"❌ **ITEM REMOVIDO:** O módulo '{info['nome']}' sumiu no técnico!")
+                    xml_ok = False
+                elif conf[id_v]['cor'] != info['cor']:
+                    st.warning(f"🎨 **TROCA DE COR:** '{info['nome']}' mudou de {info['cor']} para {conf[id_v]['cor']}.")
             
-            if not xml_confirmado:
-                st.checkbox("Estou ciente das remoções/alterações e confirmo que o projeto técnico está correto.", key="check_xml")
-            else:
-                st.success("✅ Itens de venda e conferência batem perfeitamente.")
+            st.checkbox("Confirmo que as mudanças de módulos/cores são intencionais.", key="check_xml")
 
-    # --- TAB 2: HIDRÁULICA E INFRA ---
+    # --- TAB 2: HIDRÁULICA, GÁS E PEDRAS ---
     with tab2:
-        st.header("2. Pontos de Água, Gás e Acessos")
+        st.header("2. Infraestrutura de Base")
         col1, col2 = st.columns(2)
         with col1:
-            h1 = st.checkbox("CAIXA DE GORDURA: O balcão da pia permite acesso para limpeza da tampa?")
-            h2 = st.checkbox("REGISTROS: Estão acessíveis ou previu fundo falso/recorte no móvel?")
-            h3 = st.checkbox("RALO: O móvel impede o escoamento ou manutenção no local?")
+            st.subheader("💧 Água e Gás")
+            h1 = st.checkbox("CAIXA DE GORDURA: Balcão permite abertura total da tampa para limpeza?")
+            h2 = st.checkbox("REGISTROS: Estão acessíveis? Previu fundo falso ou furação para manutenção?")
+            h3 = st.checkbox("FILTRO DE ÁGUA: Existe ponto de entrada e espaço para o aparelho/elemento?")
+            h4 = st.checkbox("PONTO DE GÁS: O nicho permite a mangueira e o registro sem esmagar?")
+            h5 = st.checkbox("RALO: O móvel impede o escoamento ou acesso ao ralo de limpeza?")
         with col2:
-            h4 = st.checkbox("GÁS: Previu espaço para mangueira e registro atrás do módulo?")
-            h5 = st.checkbox("JANELA/PEITORIL: A altura da bancada permite a abertura total da janela?")
+            st.subheader("🪨 Marmoraria e Aberturas")
+            h6 = st.checkbox("PEDRA: A bancada já está instalada ou o móvel servirá de gabarito?")
+            h7 = st.checkbox("JANELA/PEITORIL: A altura da bancada e da torneira permitem a abertura da janela?")
+            h8 = st.checkbox("CUBA: A profundidade do balcão (XML) permite os grampos de fixação da cuba?")
 
-    # --- TAB 3: ELÉTRICA E ELETROS ---
+    # --- TAB 3: ELÉTRICA, ELETROS E ILUMINAÇÃO ---
     with tab3:
-        st.header("3. Elétrica, Calor e Medidas de Aparelhos")
+        st.header("3. Energia, Equipamentos e Luz")
         col3, col4 = st.columns(2)
         with col3:
+            st.subheader("⚡ Pontos Elétricos")
             e1 = st.checkbox("TOMADAS: Estão centralizadas nos vãos de Forno/Micro/Geladeira?")
-            e2 = st.checkbox("CAIXAS DE LUZ: Verificou se o armário vai tampar algum interruptor?")
-            e3 = st.checkbox("LEDs: Previu local para esconder e ventilar o driver/transformador?")
+            e2 = st.checkbox("CAIXAS DE LUZ: O armário ou painel vai obstruir algum interruptor?")
+            e3 = st.checkbox("PONTO DE COIFA: A altura do ponto elétrico está dentro do duto/móvel?")
         with col4:
-            st.markdown("**Medidas Reais dos Eletros (Fina):**")
-            n_forno = st.text_input("Nicho Forno (LxA mm)")
-            n_cook = st.text_input("Nicho Cooktop (LxP mm)")
-            e4 = st.checkbox("RESPIRO: Forno e Geladeira possuem ventilação traseira/lateral no projeto?")
+            st.subheader("💡 Iluminação LED e Eletros")
+            e4 = st.checkbox("LED PIA: Previu o canal do perfil e o furo de passagem do cabo no aéreo?")
+            e5 = st.checkbox("DRIVER LED: Onde ficará o transformador? Previu local ventilado e acessível?")
+            e6 = st.checkbox("RESPIRO ELETROS: Forno e Geladeira possuem ventilação traseira/lateral?")
+            n_forno = st.text_input("Nicho Forno/Micro (LxA em mm)")
+            n_cook = st.text_input("Nicho Cooktop (LxP em mm)")
 
-    # --- TAB 4: ENGENHARIA E ERGONOMIA ---
+    # --- TAB 4: ENGENHARIA, ERGONOMIA E PORTAS ---
     with tab4:
-        st.header("4. Engenharia de Montagem e Conforto")
+        st.header("4. Engenharia de Marcenaria e Conforto")
         col5, col6 = st.columns(2)
         with col5:
-            st.subheader("Montagem")
-            m1 = st.checkbox("GUARNIÇÃO: Descontou o alisado da porta para as gavetas abrirem?")
-            m2 = st.checkbox("CORTINEIRO: Deixou o espaço de 15cm para o trilho da cortina?")
-            m3 = st.checkbox("EMPENAMENTO: Prateleiras > 900mm têm reforço ou divisão?")
-            m4 = st.checkbox("DRYWALL: Confirmou se a parede tem reforço para móveis suspensos?")
+            st.subheader("🔩 Detalhamento de Montagem")
+            m1 = st.checkbox("GUARNIÇÃO: Descontou o batente da porta para as gavetas abrirem?")
+            m2 = st.checkbox("CORTINEIRO: Deixou 15cm de espaço para o trilho/varão da cortina?")
+            m3 = st.checkbox("PÉ-DIREITO: Medido em 3 pontos. O móvel não vai travar no teto torto?")
+            m4 = st.checkbox("DIVISÓRIA DE AMBIENTE: Ferragem confirmada (Oculta ou Aparente / Italinea ou Externa)?")
+            m5 = st.checkbox("EMPENAMENTO: Prateleiras largas (>900mm) possuem reforço central ou engrosso?")
+            m6 = st.checkbox("DRYWALL: Confirmou se a parede tem reforço de madeira para suspensos?")
         with col6:
-            st.subheader("Ergonomia (UX)")
-            g1 = st.checkbox("ALTURA AÉREOS: O cliente não corre risco de bater a cabeça?")
-            g2 = st.checkbox("TV: Está no eixo da cama e na altura correta para o quarto?")
-            g3 = st.checkbox("AR CONDICIONADO: O móvel permite manutenção e limpeza do filtro?")
+            st.subheader("🛌 Ergonomia e UX")
+            g1 = st.checkbox("ALTURA AÉREOS: O cliente não corre risco de bater a cabeça ao levantar/circular?")
+            g2 = st.checkbox("TV: Está no eixo central da cama e na altura correta para o quarto?")
+            g3 = st.checkbox("AR CONDICIONADO: O móvel permite manutenção e abertura da tampa do filtro?")
+            g4 = st.checkbox("CIRCULAÇÃO: Existe o mínimo de 60cm de passagem livre em corredores?")
 
     # --- TAB 5: FINALIZAÇÃO ---
     with tab5:
-        st.header("5. Lacre de Produção")
+        st.header("5. Lacre de Produção Amare Italinea")
         cliente = st.text_input("Nome do Cliente / Contrato")
-        foto = st.file_uploader("📷 FOTO OBRIGATÓRIA: Trena na parede ou Papel de Ofício", type=['jpg', 'png', 'jpeg'])
-        obs = st.text_area("Instruções Técnicas para o Montador")
+        foto = st.file_uploader("📷 FOTO OBRIGATÓRIA: Trena na parede ou Papel de Ofício (Medida Fina)", type=['jpg', 'png', 'jpeg'])
+        obs = st.text_area("INSTRUÇÕES CRÍTICAS PARA O MONTADOR (Ex: Cuidado com registro escondido)")
         
-        if st.button("🚀 GERAR LAUDO FINAL DE AUDITORIA"):
-            # Consolidação de todos os checklists
-            obrigatorios = [h1, h2, h3, h4, h5, e1, e2, e4, m1, m2, m3, g1, g2, g3, foto, cliente]
+        if st.button("🚀 GERAR LAUDO FINAL DE ENGENHARIA"):
+            # Verificação de todos os campos obrigatórios para travar o erro
+            checks = [h1, h2, h3, h4, h5, h6, h7, h8, e1, e2, e3, e4, e5, e6, m1, m2, m3, m4, m5, m6, g1, g2, g3, g4, foto, cliente]
             
-            if not all(obrigatorios):
-                st.error("❌ SISTEMA BLOQUEADO: Existem itens técnicos ou de segurança não validados. Revise as abas anteriores.")
+            if not all(checks):
+                st.error("❌ SISTEMA BLOQUEADO: Existem itens técnicos ou de segurança não validados. Revise todas as abas!")
             else:
                 st.balloons()
                 pdf = FPDF()
                 pdf.add_page()
                 pdf.set_font("Arial", 'B', 16)
-                pdf.cell(0, 10, "AMARE ITALINEA - LAUDO DE AUDITORIA TÉCNICA", ln=True, align='C')
-                # (Lógica de PDF completa aqui...)
-                pdf_name = f"Auditoria_{cliente}.pdf"
-                pdf.output(pdf_name)
-                with open(pdf_name, "rb") as f:
-                    st.download_button("📥 BAIXAR PDF PARA FÁBRICA", f, file_name=pdf_name)
+                pdf.cell(0, 10, "AMARE ITALINEA - LAUDO DE AUDITORIA 360", ln=True, align='C')
+                
+                pdf.set_font("Arial", size=11)
+                pdf.ln(10)
+                pdf.cell(0, 10, f"Cliente: {cliente} | Conferente: {st.session_state['nome_usuario']}", ln=True)
+                pdf.cell(0, 10, f"Data da Auditoria: {datetime.now().strftime('%d/%m/%Y %H:%M')}", ln=True)
+                
+                pdf.ln(5)
+                pdf.set_font("Arial", 'B', 12)
+                pdf.cell(0, 10, "RESUMO DE ENGENHARIA:", ln=True)
+                pdf.set_font("Arial", size=10)
+                pdf.multi_cell(0, 7, f"Eletros - Forno: {n_forno} | Cooktop: {n_cook}\nObs: {obs}")
+                
+                pdf_file = f"Laudo_{cliente}.pdf"
+                pdf.output(pdf_file)
+                with open(pdf_file, "rb") as f:
+                    st.download_button("📥 BAIXAR LAUDO PARA FÁBRICA", f, file_name=pdf_file)
