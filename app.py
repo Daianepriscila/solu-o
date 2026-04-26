@@ -5,9 +5,9 @@ from datetime import datetime
 # --- CONFIGURAÇÃO DE USUÁRIOS (Login e Senha) ---
 # Você pode adicionar quantos funcionários quiser aqui
 USUARIOS = {
-    "joao_conferente": "italinea123",
-    "maria_tecnica": "conferente2024",
-    "admin": "loja01"
+    "michel_conferente": "italinea123",
+    "matheus_conferente": "italinea456",
+    "douglas_conferente": "italinea789"
 }
 
 def login():
