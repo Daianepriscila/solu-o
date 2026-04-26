@@ -3,129 +3,105 @@ import xml.etree.ElementTree as ET
 from fpdf import FPDF
 from datetime import datetime
 
-# --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Checklist Italinea", page_icon="📐")
+# Configuração Master do App
+st.set_page_config(page_title="Super Auditor Italinea", layout="centered")
 
-# --- ESTILIZAÇÃO CSS PARA PARECER UM APP ---
-st.markdown("""
-    <style>
-    .main { background-color: #f5f5f5; }
-    .stButton>button { width: 100%; border-radius: 5px; height: 3em; background-color: #D32F2F; color: white; }
-    .stCheckbox { background: white; padding: 10px; border-radius: 5px; margin-bottom: 5px; box-shadow: 1px 1px 3px #ccc; }
-    </style>
-    """, unsafe_allow_html=True)
+def extrair_detalhes(file):
+    if not file: return {}
+    try:
+        tree = ET.parse(file)
+        root = tree.getroot()
+        itens = {}
+        for i in root.iter('Item'):
+            nome = i.get('Description', 'Módulo')
+            larg = float(i.get('Width', 0))
+            itens[nome] = {'largura': larg}
+        return itens
+    except: return {}
 
-st.title("🛡️ Sistema Anti-Erro Pós-Venda")
-st.subheader("Conferência Técnica Obrigatória - Italinea")
+st.title("🚀 Super Auditor 360° Italinea")
+st.write("Sistema de Blindagem Pós-Venda: Da Planta à Montagem.")
 
-# --- 1. IDENTIFICAÇÃO ---
+# --- ETAPA 0: QUEM É O CLIENTE ---
+with st.expander("📄 Identificação do Projeto", expanded=True):
+    col1, col2 = st.columns(2)
+    cliente = col1.text_input("Nome do Cliente")
+    contrato = col2.text_input("Número do Contrato/Pedido")
+    conferente = st.text_input("Técnico Conferente")
+
+# --- ETAPA 1: AUDITORIA DE PROJETO (XML) ---
+st.header("1️⃣ Auditoria de Itens (Venda vs Conferência)")
+st.info("Suba os arquivos para comparar se algum módulo sumiu ou mudou de tamanho.")
+c1, c2 = st.columns(2)
+f_venda = c1.file_uploader("XML do Projeto de Venda", type=['xml'])
+f_conf = c2.file_uploader("XML da Conferência Técnica", type=['xml'])
+
+mudancas_ok = True
+if f_venda and f_conf:
+    venda = extrair_detalhes(f_venda)
+    conf = extrair_detalhes(f_conf)
+    alertas = []
+    for item, dados in conf.items():
+        if item in venda and venda[item]['largura'] != dados['largura']:
+            alertas.append(f"📏 O módulo **{item}** mudou de {venda[item]['largura']}mm para {dados['largura']}mm.")
+    
+    if alertas:
+        for a in alertas: st.warning(a)
+        mudancas_ok = st.checkbox("Estou ciente das mudanças e confirmo que o eletro/vão ainda cabe.")
+
+# --- ETAPA 2: ESPECIFICAÇÃO DE ELETROS E PONTOS ---
+st.header("2️⃣ Eletros e Infraestrutura")
+st.write("Evite que o móvel chegue e o eletro não encaixe ou a tomada esteja no local errado.")
+col_e1, col_e2 = st.columns(2)
+with col_e1:
+    f_med = st.text_input("Medidas do Forno (LxA em mm)", placeholder="Ex: 595x590")
+    c_med = st.text_input("Medidas do Cooktop (Nicho em mm)", placeholder="Ex: 560x480")
+with col_e2:
+    g_med = st.text_input("Largura da Geladeira (mm)", placeholder="Ex: 700")
+    ponto = st.selectbox("Situação Elétrica/Hidráulica", ["Pontos Ok", "Técnico marcou p/ puxar", "Cliente vai ajustar"])
+
+obs_ponto = st.text_area("Instrução de Ponto: (Ex: Puxar tomada 15cm para a direita)")
+
+# --- ETAPA 3: O OLHAR TÉCNICO (CHECKLIST) ---
+st.header("3️⃣ Checklist de Obra (Onde o XML não vê)")
 col_a, col_b = st.columns(2)
 with col_a:
-    cliente = st.text_input("Nome do Cliente / Contrato")
+    q1 = st.checkbox("GUARNIÇÃO: Porta/Gaveta abre sem bater no alisado da porta?")
+    q2 = st.checkbox("PÉ-DIREITO: Medido em 3 pontos (evita travar no gesso)?")
+    q3 = st.checkbox("RALO/CANO: Altura do esgoto permite o fundo do móvel?")
 with col_b:
-    tecnico = st.text_input("Técnico Responsável")
+    q4 = st.checkbox("SANCA: Os basculantes abrem sem bater no gesso?")
+    q5 = st.checkbox("PRUMO: Paredes retas ou previu fechamento maior?")
+    q6 = st.checkbox("CUBA: Profundidade do balcão permite grampos e torneira?")
 
+# --- ETAPA 4: EVIDÊNCIA ---
+st.header("4️⃣ Foto de Segurança")
+foto = st.file_uploader("📷 Foto da Trena na parede ou marcação de pontos", type=['jpg', 'png'])
+
+# --- BOTÃO FINAL ---
 st.divider()
-
-# --- 2. ANÁLISE AUTOMÁTICA DO XML ---
-st.header("1. Análise do Arquivo (XML)")
-xml_file = st.file_uploader("Upload do XML do Projeto", type=['xml'])
-
-alertas_xml = []
-if xml_file:
-    try:
-        tree = ET.parse(xml_file)
-        root = tree.getroot()
-        
-        # Exemplo de lógica: Procura módulos com medidas suspeitas ou sem descrição
-        for item in root.iter('Item'):
-            desc = item.get('Description', 'Sem Nome')
-            largura = float(item.get('Width', 0))
-            prof = float(item.get('Depth', 0))
-            
-            # Alerta: Profundidade muito baixa para balcões de pia
-            if "PIÁ" in desc.upper() and prof < 500:
-                alertas_xml.append(f"⚠️ Alerta: {desc} com profundidade baixa ({prof}mm). Verifique a cuba!")
-            
-            # Alerta: Itens com medida ZERO (Erro comum de inserção)
-            if largura <= 0:
-                alertas_xml.append(f"❌ Erro Crítico: {desc} está com largura ZERO no XML!")
-
-        if alertas_xml:
-            for erro in alertas_xml:
-                st.error(erro)
-        else:
-            st.success("✅ Nenhuma inconsistência técnica detectada no XML.")
-    except Exception as e:
-        st.error(f"Erro ao ler XML: {e}")
-
-st.divider()
-
-# --- 3. CHECKLIST HUMANO (TRAVAMENTO) ---
-st.header("2. Conferência de Campo")
-st.info("O técnico DEVE marcar todos os itens abaixo após conferência física no local.")
-
-c1 = st.checkbox("Conferi as medidas de parede com trena laser e batem com o projeto?")
-c2 = st.checkbox("Prumo e esquadro das paredes foram verificados?")
-c3 = st.checkbox("Pontos de hidráulica, gás e esgoto estão na posição correta?")
-c4 = st.checkbox("As tomadas de eletros (forno, micro, coifa) estão no local certo?")
-c5 = st.checkbox("Verifiquei se há rodapés, molduras ou sancas que impedem a montagem?")
-c6 = st.checkbox("O sentido do veio do MDF e as cores das frentes foram confirmados?")
-
-st.divider()
-
-# --- 4. GERAÇÃO DO RELATÓRIO PDF ---
-st.header("3. Finalização")
-obs = st.text_area("Observações Técnicas Extras")
-
-# Botão para processar tudo
-if st.button("GERAR RELATÓRIO PARA ENVIO"):
-    if not cliente or not tecnico:
-        st.error("Preencha o nome do cliente e do técnico!")
-    elif not (c1 and c2 and c3 and c4 and c5 and c6):
-        st.error("❌ BLOQUEADO: Você deve marcar todos os itens do checklist para prosseguir!")
+if st.button("🏁 FINALIZAR E GERAR LAUDO TÉCNICO"):
+    checks = [q1, q2, q3, q4, q5, q6]
+    if not (cliente and contrato and conferente and foto):
+        st.error("❌ ERRO: Preencha a identificação e anexe a foto da trena.")
+    elif not all(checks):
+        st.error("❌ BLOQUEADO: Você precisa validar todos os pontos do Checklist de Obra.")
+    elif not mudancas_ok:
+        st.error("❌ BLOQUEADO: Confirme que está ciente das mudanças no Passo 1.")
     else:
-        # Criando o PDF
+        st.balloons()
         pdf = FPDF()
         pdf.add_page()
         pdf.set_font("Arial", 'B', 16)
-        pdf.cell(200, 10, txt="RELATÓRIO DE CONFERÊNCIA TÉCNICA", ln=True, align='C')
-        
+        pdf.cell(0, 10, f"LAUDO TÉCNICO: {cliente}", ln=True, align='C')
         pdf.set_font("Arial", size=12)
         pdf.ln(10)
-        pdf.cell(200, 10, txt=f"Cliente: {cliente}", ln=True)
-        pdf.cell(200, 10, txt=f"Técnico: {tecnico}", ln=True)
-        pdf.cell(200, 10, txt=f"Data: {datetime.now().strftime('%d/%m/%Y %H:%M')}", ln=True)
+        pdf.cell(0, 10, f"Contrato: {contrato} | Técnico: {conferente}", ln=True)
+        pdf.cell(0, 10, f"Eletros - Forno/Micro: {f_med} | Cooktop: {c_med}", ln=True)
+        pdf.cell(0, 10, f"Infraestrutura: {ponto}", ln=True)
+        pdf.multi_cell(0, 10, f"Obs de Ponto: {obs_ponto}")
         
-        pdf.ln(5)
-        pdf.set_font("Arial", 'B', 12)
-        pdf.cell(200, 10, txt="Itens Verificados e Confirmados:", ln=True)
-        pdf.set_font("Arial", size=10)
-        pdf.multi_cell(0, 8, txt="- Medidas de parede\n- Prumo e Esquadro\n- Pontos de Hidráulica/Gás\n- Posicionamento de Tomadas\n- Interferências (Sancas/Rodapés)\n- Sentido do Veio e Cores")
-        
-        if alertas_xml:
-            pdf.ln(5)
-            pdf.set_font("Arial", 'B', 12)
-            pdf.cell(200, 10, txt="Alertas do XML (Atenção):", ln=True)
-            pdf.set_font("Arial", size=10)
-            for a in alertas_xml:
-                pdf.multi_cell(0, 8, txt=f"- {a}")
-
-        pdf.ln(5)
-        pdf.set_font("Arial", 'B', 12)
-        pdf.cell(200, 10, txt="Observações do Técnico:", ln=True)
-        pdf.set_font("Arial", size=10)
-        pdf.multi_cell(0, 8, txt=obs if obs else "Nenhuma observação.")
-
-        # Salvar e disponibilizar download
-        pdf_output = "Relatorio_Conferencia.pdf"
-        pdf.output(pdf_output)
-        
-        with open(pdf_output, "rb") as file:
-            st.download_button(
-                label="📥 BAIXAR RELATÓRIO PDF",
-                data=file,
-                file_name=f"Conferencia_{cliente}.pdf",
-                mime="application/pdf"
-            )
-        st.success("Relatório gerado com sucesso! Baixe o arquivo acima e envie para a gerência.")
+        pdf_name = f"Laudo_{contrato}.pdf"
+        pdf.output(pdf_name)
+        with open(pdf_name, "rb") as f:
+            st.download_button("📥 BAIXAR PDF PARA O GERENTE", f, file_name=pdf_name)
