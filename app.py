@@ -1,5 +1,5 @@
 import streamlit as st
-import xml.etree.Tree as ET
+import xml.etree.ElementTree as ET
 from fpdf import FPDF
 from datetime import datetime
 
@@ -17,7 +17,6 @@ def analisar_divergencias(venda_file, conf_file):
         itens = {}
         pe_direito = 0
         parede_total = 0
-        hidraulica_esgoto = 0 # Simulação de pontos captados via XML
         for i in root.iter('Item'):
             nome = i.get('Description', 'Módulo')
             larg = float(i.get('Width', 0))
@@ -27,22 +26,17 @@ def analisar_divergencias(venda_file, conf_file):
             # Captura Pé-Direito e Medida Total de Parede
             if "DIREITO" in nome.upper(): pe_direito = alt
             if "PAREDE" in nome.upper(): parede_total += larg
-            if "PONTO" in nome.upper(): hidraulica_esgoto += larg # Exemplo de ponto de infra
             
-        return itens, pe_direito, parede_total, hidraulica_esgoto
+        return itens, pe_direito, parede_total
 
-    v_itens, v_pe, v_par, v_hid = extrair(venda_file)
-    c_itens, c_pe, c_par, c_hid = extrair(conf_file)
+    v_itens, v_pe, v_par = extrair(venda_file)
+    c_itens, c_pe, c_par = extrair(conf_file)
     alertas = []
 
-    # 1. Alerta de Parede e Infraestrutura (Tolerância 150mm / 15cm)
+    # 1. Alerta de Parede (Tolerância 150mm / 15cm)
     dif_par = abs(v_par - c_par)
     if dif_par >= 150 and v_par > 0:
         alertas.append(f"🧱 PAREDE: Diferença CRÍTICA de {dif_par}mm na largura da parede (Venda: {v_par}mm | Real: {c_par}mm).")
-
-    dif_hid = abs(v_hid - c_hid)
-    if dif_hid >= 150 and v_hid > 0:
-        alertas.append(f"💧 INFRAESTRUTURA: Diferença de {dif_hid}mm detectada em pontos de Hidráulica/Esgoto.")
 
     # 2. Alerta de Pé-Direito (Tolerância 20mm e Aviso de 15cm)
     dif_pe = abs(v_pe - c_pe)
@@ -148,8 +142,6 @@ else:
                 pdf.set_font("Arial", size=10)
                 pdf.ln(10)
                 pdf.cell(0, 10, f"Cliente: {cliente} | Data: {datetime.now().strftime('%d/%m/%Y')}", ln=True)
-                pdf.ln(5)
-                pdf.cell(0, 10, f"Eletros Informados - Geladeira: {geladeira}mm | Forno: {forno}mm", ln=True)
                 
                 pdf_name = f"Laudo_{cliente}.pdf"
                 pdf.output(pdf_name)
