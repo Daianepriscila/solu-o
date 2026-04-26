@@ -3,7 +3,7 @@ import xml.etree.ElementTree as ET
 from fpdf import FPDF
 from datetime import datetime
 
-# --- CONFIGURAÇÃO ---
+# --- CONFIGURAÇÃO MASTER ---
 st.set_page_config(page_title="Amare Italinea - Auditoria Master", layout="wide")
 
 # --- USUÁRIOS ---
@@ -15,43 +15,26 @@ def analisar_divergencias(venda_file, conf_file):
         tree = ET.parse(file)
         root = tree.getroot()
         itens = {}
-        pe_direito = 0
-        parede_total = 0
+        pe_direito, parede_total = 0, 0
         for i in root.iter('Item'):
             nome = i.get('Description', 'Módulo')
-            larg = float(i.get('Width', 0))
-            alt = float(i.get('Height', 0))
+            larg, alt = float(i.get('Width', 0)), float(i.get('Height', 0))
             itens[nome] = {'L': larg, 'A': alt}
-            
-            # Captura Pé-Direito e Medida Total de Parede
             if "DIREITO" in nome.upper(): pe_direito = alt
             if "PAREDE" in nome.upper(): parede_total += larg
-            
         return itens, pe_direito, parede_total
 
     v_itens, v_pe, v_par = extrair(venda_file)
     c_itens, c_pe, c_par = extrair(conf_file)
     alertas = []
 
-    # 1. Alerta de Parede (Tolerância 150mm / 15cm)
-    dif_par = abs(v_par - c_par)
-    if dif_par >= 150 and v_par > 0:
-        alertas.append(f"🧱 PAREDE: Diferença CRÍTICA de {dif_par}mm na largura da parede (Venda: {v_par}mm | Real: {c_par}mm).")
-
-    # 2. Alerta de Pé-Direito (Tolerância 20mm e Aviso de 15cm)
-    dif_pe = abs(v_pe - c_pe)
-    if dif_pe >= 150:
-        alertas.append(f"🚨 PÉ-DIREITO CRÍTICO: Diferença maior que 15cm detectada ({dif_pe}mm). Verifique o gesso/laje!")
-    elif dif_pe > 20 and v_pe > 0:
-        alertas.append(f"🚨 PÉ-DIREITO: Variação de {dif_pe}mm detectada. Justifique o desnível:")
-
-    # 3. Alerta de Módulos (Tolerância 20mm)
+    if abs(v_par - c_par) >= 150 and v_par > 0:
+        alertas.append(f"🧱 PAREDE: Diferença de {abs(v_par-c_par)}mm. Verifique se o ajuste de fechamento/vistas no XML é suficiente!")
+    if abs(v_pe - c_pe) > 20 and v_pe > 0:
+        alertas.append(f"🚨 PÉ-DIREITO: Variação de {abs(v_pe-c_pe)}mm. Cuidado com móveis até o teto!")
     for nome, info in v_itens.items():
-        if nome in c_itens:
-            dif_l = abs(info['L'] - c_itens[nome]['L'])
-            if dif_l > 20:
-                alertas.append(f"📏 MÓDULO: '{nome}' alterado em {dif_l}mm. O vão de eletros foi conferido?")
-    
+        if nome in c_itens and abs(info['L'] - c_itens[nome]['L']) > 20:
+            alertas.append(f"📏 MÓDULO: '{nome}' mudou {abs(info['L']-c_itens[nome]['L'])}mm. Isso altera o alinhamento de frentes ou eletros?")
     return alertas
 
 # --- SISTEMA DE LOGIN ---
@@ -67,7 +50,7 @@ if not st.session_state["logado"]:
             st.rerun()
         else: st.sidebar.error("Acesso Negado")
 else:
-    st.title(f"🕵️ Auditoria Master: {st.session_state['nome_usuario']}")
+    st.title(f"🕵️ Auditoria Master Amare: {st.session_state['nome_usuario']}")
     if st.sidebar.button("Sair"):
         st.session_state["logado"] = False
         st.rerun()
@@ -75,75 +58,78 @@ else:
     tab1, tab2, tab3, tab4 = st.tabs(["📊 Análise XML", "🏠 Engenharia de Campo", "🔌 Eletros e Aparelhos", "🏁 Lacre Final"])
 
     with tab1:
-        st.header("1. Comparação Automática (Tolerância: Parede 15cm / Móvel 2cm)")
-        file_venda = st.file_uploader("XML Venda", type=['xml'])
-        file_conf = st.file_uploader("XML Conferência", type=['xml'])
-
+        st.header("1. Inteligência de Confronto (Venda vs Conferência)")
+        f_venda = st.file_uploader("XML Venda", type=['xml'])
+        f_conf = st.file_uploader("XML Conferência", type=['xml'])
         xml_validado = True
-        if file_venda and file_conf:
-            questoes = analisar_divergencias(file_venda, file_conf)
+        if f_venda and f_conf:
+            questoes = analisar_divergencias(f_venda, f_conf)
             if questoes:
-                st.error("🚨 DIVERGÊNCIAS DETECTADAS NO PROJETO:")
-                respostas = []
-                for i, q in enumerate(questoes):
-                    st.warning(q)
-                    res = st.text_area(f"Justificativa Técnica para: {q[:30]}...", key=f"ans_{i}")
-                    respostas.append(res)
+                st.error("🚨 DIVERGÊNCIAS DETECTADAS NO XML:")
+                respostas = [st.text_area(f"Justificativa para: {q}", key=f"ans_{i}") for i, q in enumerate(questoes)]
                 xml_validado = all([len(r) > 10 for r in respostas])
-            else:
-                st.success("✅ Projeto em conformidade técnica.")
+            else: st.success("✅ XMLs em conformidade.")
 
     with tab2:
-        st.header("2. O Olhar do Especialista (Folha de Ofício)")
-        c1, c2 = st.columns(2)
-        with c1:
-            h1 = st.checkbox("Caixa de Gordura, Registros e Filtro de água acessíveis?")
-            h2 = st.checkbox("Altura da bancada permite abertura da janela/torneira?")
-            h3 = st.checkbox("Ponto de Gás e Esgoto previstos nos nichos?")
-            h4 = st.checkbox("LEDs: Perfil e furação de passagem de cabos previstos?")
-        with c2:
-            m1 = st.checkbox("GUARNIÇÃO: Gavetas e portas abrem sem bater no batente?")
-            m2 = st.checkbox("PÉ-DIREITO: Medido em 3 pontos p/ checar queda de laje?")
-            m3 = st.checkbox("EMPENAMENTO: Reforço em prateleiras largas (>900mm)?")
-            g1 = st.checkbox("ERGONOMIA: Bater cabeça, Eixo da TV e Filtro do Ar?")
+        st.header("2. O Olhar do Especialista (Análise de Risco na Obra)")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("💧 Hidráulica, Gás e Pedras")
+            h1 = st.checkbox("CAIXA DE GORDURA: Balcão permite a abertura da tampa SEM remover o móvel?")
+            h2 = st.checkbox("REGISTROS/SIFÃO: O fundo do móvel foi recuado p/ tubulação (fundo falso)?")
+            h3 = st.checkbox("FILTRO DE ÁGUA: Há ponto de energia e espaço livre para o aparelho?")
+            h4 = st.checkbox("JANELA/PEITORIL: A altura final da pedra permite a abertura total da janela?")
+            h5 = st.checkbox("GÁS: A mangueira e o registro possuem acesso fácil (não estão esmagados)?")
+            h6 = st.checkbox("RALO: O móvel impede o escoamento ou acesso ao ralo de limpeza?")
+
+        with col2:
+            st.subheader("🧱 Detalhes Civis e Estrutura")
+            m1 = st.checkbox("GUARNIÇÃO: O puxador ou a porta batem no alisado da porta ao abrir?")
+            m2 = st.checkbox("DRYWALL: Parede de gesso possui reforço de madeira p/ móveis suspensos?")
+            m3 = st.checkbox("PÉ-DIREITO: Medido em 3 pontos p/ garantir que móvel não trave na laje?")
+            m4 = st.checkbox("RODAPÉ CIVIL: Previu o recorte ou ajuste para o rodapé da casa?")
+            m5 = st.checkbox("EMPENAMENTO: Prateleiras/tampos > 900mm têm reforço central ou engrosso?")
+
+        st.divider()
+        col3, col4 = st.columns(2)
+        with col3:
+            st.subheader("🛌 Ergonomia e UX (Conforto)")
+            g1 = st.checkbox("ALTURA AÉREOS: O cliente não bate a cabeça ao circular na cozinha?")
+            g2 = st.checkbox("TV: Está no eixo da cama e na altura correta (conforto cervical)?")
+            g3 = st.checkbox("AR CONDICIONADO: Há 15cm acima do móvel p/ manutenção do filtro?")
+            g4 = st.checkbox("LED/DRIVER: Previu local ventilado e acessível p/ transformador do LED?")
+        with col4:
+            st.subheader("⚙️ Ferragens e Cantos")
+            f1 = st.checkbox("DIVISÓRIA: Ferragem confirmada (Oculta ou Aparente / Italinea ou Externa)?")
+            f2 = st.checkbox("CANTO L: Previu distanciador (bate-fecha) p/ puxadores não colidirem?")
 
     with tab3:
-        st.header("3. Medidas de Eletros e Aparelhos")
-        st.info("Caso o cliente não possua o aparelho, preencha com 0.")
-        col_e1, col_e2, col_e3 = st.columns(3)
-        with col_e1:
-            geladeira = st.number_input("Largura Geladeira (mm)", value=0)
-            microondas = st.number_input("Largura Micro-ondas (mm)", value=0)
-            forno = st.number_input("Largura Forno (mm)", value=0)
-        with col_e2:
-            adega = st.number_input("Largura Adega (mm)", value=0)
-            cervejeira = st.number_input("Largura Cervejeira (mm)", value=0)
-            aquecedor = st.number_input("Largura Aquecedor de Água (mm)", value=0)
-        with col_e3:
-            st.write("**Instruções:**")
-            st.caption("Verifique se as medidas acima batem com os vãos deixados no projeto técnico.")
+        st.header("3. Memorial Descritivo de Eletros")
+        st.info("Caso o cliente não possua o aparelho, mantenha em 0.")
+        e1, e2, e3 = st.columns(3)
+        gel_l = e1.number_input("Largura Geladeira (mm)", value=0)
+        mic_l = e1.number_input("Largura Micro-ondas (mm)", value=0)
+        for_l = e2.number_input("Largura Forno (mm)", value=0)
+        ade_l = e2.number_input("Largura Adega (mm)", value=0)
+        cer_l = e3.number_input("Largura Cervejeira (mm)", value=0)
+        aqu_l = e3.number_input("Largura Aquecedor Torneira (mm)", value=0)
 
     with tab4:
-        st.header("4. Registro e Geração de Laudo")
-        cliente = st.text_input("Cliente / Contrato")
-        foto = st.file_uploader("📷 Foto Obrigatória: Papel de Ofício (Medida Fina)", type=['jpg', 'png'])
+        st.header("4. Lacre de Produção Amare")
+        cliente = st.text_input("Nome do Cliente / Contrato")
+        foto = st.file_uploader("📷 FOTO OBRIGATÓRIA: Papel de Ofício (Medida Fina)", type=['jpg', 'png', 'jpeg'])
+        obs = st.text_area("Instruções Técnicas (O que não está no desenho)")
         
-        if st.button("🚀 FINALIZAR E GERAR PDF AMARE"):
-            if not cliente or not foto or not xml_validado:
-                st.error("❌ SISTEMA BLOQUEADO: Verifique se justificou as mudanças do XML e anexou a foto.")
-            elif not (h1 and h2 and h3 and h4 and m1 and m2 and m3 and g1):
-                st.error("❌ SISTEMA BLOQUEADO: Complete o checklist de engenharia.")
+        if st.button("🚀 FINALIZAR E GERAR PDF"):
+            v = [h1, h2, h3, h4, h5, h6, m1, m2, m3, m4, m5, g1, g2, g3, g4, f1, f2, foto, cliente, xml_validado]
+            if not all(v):
+                st.error("❌ SISTEMA BLOQUEADO: Revise todas as abas e justifique as mudanças do XML.")
             else:
                 st.balloons()
                 pdf = FPDF()
                 pdf.add_page()
                 pdf.set_font("Arial", 'B', 16)
-                pdf.cell(0, 10, "AMARE ITALINEA - LAUDO DE AUDITORIA", ln=True, align='C')
-                pdf.set_font("Arial", size=10)
-                pdf.ln(10)
-                pdf.cell(0, 10, f"Cliente: {cliente} | Data: {datetime.now().strftime('%d/%m/%Y')}", ln=True)
-                
-                pdf_name = f"Laudo_{cliente}.pdf"
-                pdf.output(pdf_name)
-                with open(pdf_name, "rb") as f:
-                    st.download_button("📥 BAIXAR LAUDO", f, file_name=pdf_name)
+                pdf.cell(0, 10, "AMARE ITALINEA - LAUDO DE AUDITORIA MASTER", ln=True, align='C')
+                pdf.output(f"Laudo_{cliente}.pdf")
+                with open(f"Laudo_{cliente}.pdf", "rb") as f:
+                    st.download_button("📥 BAIXAR LAUDO", f, file_name=f"Laudo_{cliente}.pdf")
