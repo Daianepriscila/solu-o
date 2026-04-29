@@ -7,52 +7,15 @@ import ezdxf
 import io
 import os
 
-# --- 1. CONFIGURAÇÕES E ESTADO DO APP ---
-st.set_page_config(page_title="Amare - Auditoria Master", layout="wide")
+# --- 1. CONFIGURAÇÕES E ESTADO DA SESSÃO ---
+st.set_page_config(page_title="Amare Italinea - Auditoria Master", layout="wide")
 
-if "inicio_atendimento" not in st.session_state:
-    st.session_state["inicio_atendimento"] = datetime.now()
-if "extras_lista" not in st.session_state:
-    st.session_state["extras_lista"] = []
-if "logado" not in st.session_state:
-    st.session_state["logado"] = False
+if "inicio" not in st.session_state: st.session_state["inicio"] = datetime.now()
+if "extras" not in st.session_state: st.session_state["extras"] = []
+if "logado" not in st.session_state: st.session_state["logado"] = False
+if "mapa_buffer" not in st.session_state: st.session_state["mapa_buffer"] = None
 
-# --- 2. MOTOR DE DESENHO (DXF 3D) ---
-def gerar_mapa_confronto(v_dxf, c_dxf):
-    try:
-        fig = plt.figure(figsize=(10, 6))
-        ax = fig.add_subplot(111, projection='3d')
-        
-        def desenhar(file, cor, alpha, label):
-            if file is None: return
-            with open("temp_audit.dxf", "wb") as f:
-                f.write(file.getbuffer())
-            doc = ezdxf.readfile("temp_audit.dxf")
-            msp = doc.modelspace()
-            # Filtro de escala para evitar travamentos
-            for e in msp.query('LINE'):
-                # Só desenha linhas que representam estrutura (maiores que 10cm)
-                if e.dxf.start.distance(e.dxf.end) > 100:
-                    ax.plot([e.dxf.start.x, e.dxf.end.x], 
-                            [e.dxf.start.y, e.dxf.end.y], 
-                            [e.dxf.start.z, e.dxf.end.z], color=cor, alpha=alpha, lw=1)
-            os.remove("temp_audit.dxf")
-
-        desenhar(v_dxf, 'red', 0.3, 'Venda')     # Vermelho: O que era original
-        desenhar(c_dxf, 'green', 0.8, 'Técnico') # Verde: O que ficou final
-        
-        ax.set_axis_off()
-        ax.view_init(elev=20, azim=45)
-        
-        buf = io.BytesIO()
-        plt.savefig(buf, format='png', dpi=100)
-        buf.seek(0)
-        return buf
-    except Exception as e:
-        st.error(f"Erro ao processar desenho 3D: {e}")
-        return None
-
-# --- 3. MOTOR DE AUDITORIA FINANCEIRA (XML) ---
+# --- 2. MOTOR DE AUDITORIA XML (LISTA DE PREJUÍZO) ---
 def auditoria_xml(f1, f2):
     def extrair(file):
         try:
@@ -62,87 +25,125 @@ def auditoria_xml(f1, f2):
     v, c = extrair(f1), extrair(f2)
     return [i for i in v if i not in c], [i for i in c if i not in v]
 
+# --- 3. MOTOR DE DESENHO 3D (DXF) ---
+def gerar_3d(v_file, c_file):
+    try:
+        fig = plt.figure(figsize=(12, 8))
+        ax = fig.add_subplot(111, projection='3d')
+        
+        def desenhar(file, cor, alpha):
+            with open("temp.dxf", "wb") as f: f.write(file.getbuffer())
+            doc = ezdxf.readfile("temp.dxf")
+            msp = doc.modelspace()
+            for e in msp.query('LINE'):
+                if e.dxf.start.distance(e.dxf.end) > 50: # Filtro de ruído
+                    ax.plot([e.dxf.start.x, e.dxf.end.x], [e.dxf.start.y, e.dxf.end.y], [e.dxf.start.z, e.dxf.end.z], color=cor, alpha=alpha, lw=1)
+            os.remove("temp.dxf")
+
+        desenhar(v_file, 'red', 0.3)   # Original (Venda)
+        desenhar(c_file, 'green', 0.8) # Técnico (Conferência)
+        ax.set_axis_off()
+        ax.view_init(elev=20, azim=45)
+        
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', dpi=120)
+        st.session_state["mapa_buffer"] = buf
+        return buf
+    except: return None
+
 # --- 4. LOGIN ---
 USUARIOS = {"admin": "adminamare", "michel": "italinea123"}
 if not st.session_state["logado"]:
-    st.title("🛡️ Sistema de Auditoria Amare")
+    st.title("🛡️ Portal Amare Italinea")
     u = st.text_input("Usuário").lower()
     p = st.text_input("Senha", type="password")
-    if st.button("Acessar Painel"):
+    if st.button("Entrar"):
         if u in USUARIOS and USUARIOS[u] == p:
             st.session_state["logado"] = True
             st.rerun()
+        else: st.error("Acesso Negado")
 else:
-    # --- 5. INTERFACE DO AUDITOR ---
-    st.title("👷 Conferência Técnica e Financeira")
-    abas = st.tabs(["📊 Arquivos", "🏠 Checklist", "🔌 Eletros", "💰 Extras", "🏁 Laudo Final"])
+    # --- 5. INTERFACE ---
+    st.title("👷 Auditoria de Projetos e Pós-Venda")
+    t1, t2, t3, t4, t5 = st.tabs(["📊 Confronto Técnico", "🏠 Checklist", "🔌 Eletros", "💰 Extras (+)", "🏁 Finalizar"])
 
-    with abas[0]:
-        st.header("1. Upload de Projeto e Conferência")
+    with t1:
+        st.header("1. Importação e Comparação")
         c1, c2 = st.columns(2)
-        v_xml = c1.file_uploader("XML Venda", type=['xml'], key="vxml")
-        v_dxf = c1.file_uploader("DXF Venda", type=['dxf'], key="vdxf")
-        c_xml = c2.file_uploader("XML Conferência", type=['xml'], key="cxml")
-        c_dxf = c2.file_uploader("DXF Conferência", type=['dxf'], key="cdxf")
+        v_xml = c1.file_uploader("XML Venda", type=['xml'], key="v1")
+        v_dxf = c1.file_uploader("DXF Venda", type=['dxf'], key="v2")
+        c_xml = c2.file_uploader("XML Técnico", type=['xml'], key="c1")
+        c_dxf = c2.file_uploader("DXF Técnico", type=['dxf'], key="c2")
 
         if v_xml and c_xml:
             saiu, entrou = auditoria_xml(v_xml, c_xml)
-            st.subheader("Lista de Mudanças (XML)")
+            st.subheader("Diferenças lidas no XML")
             col_s, col_e = st.columns(2)
-            col_s.error(f"🔴 Retirados: {len(saiu)} itens")
-            col_e.success(f"🟢 Adicionados: {len(entrou)} itens")
-            
+            with col_s:
+                st.error(f"🔴 Retirados ({len(saiu)})")
+                for s in saiu[:10]: st.write(f"- {s}")
+            with col_e:
+                st.success(f"🟢 Adicionados ({len(entrou)})")
+                for e in entrou[:10]: st.write(f"- {e}")
+
         if v_dxf and c_dxf:
-            st.subheader("Comparativo 3D (DXF)")
-            img = gerar_mapa_confronto(v_dxf, c_dxf)
-            if img:
-                st.image(img, use_container_width=True)
-                st.session_state["img_laudo"] = img
+            st.subheader("Comparativo Visual 3D")
+            st.image(gerar_3d(v_dxf, c_dxf), use_container_width=True)
 
-    with abas[1]:
-        st.header("2. Checklist Técnico")
-        st.checkbox("Pontos de esgoto e água no local?"); st.checkbox("Gás com registro acessível?")
-        st.checkbox("Paredes com prumo?"); st.checkbox("Pé-direito conferido?")
+    with t2:
+        st.header("2. Checklist de Engenharia")
+        colA, colB = st.columns(2)
+        with colA:
+            st.checkbox("Pontos de água e esgoto no local?")
+            st.checkbox("Caixa de gordura permite abertura?")
+            st.checkbox("Paredes possuem prumo e esquadro?")
+        with colB:
+            st.checkbox("Tomadas bancada altura correta?")
+            st.checkbox("Pé-direito medido em 3 pontos?")
+            st.checkbox("Gás possui registro acessível?")
 
-    with abas[2]:
+    with t3:
         st.header("3. Memorial de Eletros (mm)")
-        col_g1, col_g2, col_g3 = st.columns(3)
-        gel_a = col_g1.number_input("Alt Geladeira", 0)
-        gel_l = col_g2.number_input("Larg Geladeira", 0)
-        gel_p = col_g3.number_input("Prof Geladeira", 0)
+        def input_e(nome, k):
+            st.write(f"**{nome}**")
+            cl = st.columns(3)
+            a = cl.number_input("Alt", 0, key=f"a{k}")
+            l = cl.number_input("Larg", 0, key=f"l{k}")
+            p = cl.number_input("Prof", 0, key=f"p{k}")
+            return f"{nome}: {a}x{l}x{p}mm"
+        e1 = input_e("Geladeira", "gel")
+        e2 = input_e("Forno", "forn")
 
-    with abas[3]:
+    with t4:
         st.header("4. Custos Extras")
-        if st.button("➕ Adicionar Extra"):
-            st.session_state["extras_lista"].append({"local": "", "valor": 0.0, "obs": ""})
+        if st.button("➕ Adicionar Novo Extra"):
+            st.session_state["extras"].append({"loc": "", "val": 0.0, "des": "0"})
+            st.rerun()
         
-        for i, item in enumerate(st.session_state["extras_lista"]):
-            st.markdown(f"**Item {i+1}**")
-            st.session_state["extras_lista"][i]["local"] = st.text_input(f"Onde comprou? {i}", key=f"loc{i}")
-            st.session_state["extras_lista"][i]["valor"] = st.number_input(f"Valor R$ {i}", key=f"val{i}")
-            st.session_state["extras_lista"][i]["obs"] = st.text_area(f"O que foi? {i}", key=f"obs{i}", value="0")
+        for i, ex in enumerate(st.session_state["extras"]):
+            st.markdown(f"**Registro Extra {i+1}**")
+            ce1, ce2 = st.columns(2)
+            st.session_state["extras"][i]["loc"] = ce1.text_input(f"Onde comprou?", key=f"l{i}")
+            st.session_state["extras"][i]["val"] = ce2.number_input(f"Valor R$", 0.0, key=f"v{i}")
+            st.session_state["extras"][i]["des"] = st.text_area(f"O que foi comprado?", key=f"d{i}", value="0")
 
-    with abas[4]:
-        st.header("5. Fechamento do Laudo")
+    with t5:
+        st.header("5. Fechamento de Laudo")
         cliente = st.text_input("Nome do Cliente")
-        if st.button("🏁 GERAR PDF FINAL"):
+        if st.button("🏁 GERAR LAUDO PDF FINAL"):
             pdf = FPDF()
             pdf.add_page()
             pdf.set_font("Arial", 'B', 16); pdf.cell(0, 10, f"LAUDO AMARE - {cliente}", ln=True, align='C')
             
-            # Cronômetro
             pdf.set_font("Arial", '', 10)
-            pdf.cell(0, 8, f"Início: {st.session_state['inicio_atendimento'].strftime('%d/%m %H:%M')}", ln=True)
-            pdf.cell(0, 8, f"Finalização: {datetime.now().strftime('%d/%m %H:%M')}", ln=True)
-
-            # Imagem do Desenho
-            if "img_laudo" in st.session_state:
-                with open("mapa_temp.png", "wb") as f: f.write(st.session_state["img_laudo"].getbuffer())
-                pdf.image("mapa_temp.png", x=10, w=180); os.remove("mapa_temp.png")
+            pdf.cell(0, 8, f"Início: {st.session_state['inicio'].strftime('%d/%m %H:%M')} | Fim: {datetime.now().strftime('%H:%M')}", ln=True)
             
-            # Lista de Extras
+            if st.session_state["mapa_buffer"]:
+                with open("map.png", "wb") as f: f.write(st.session_state["mapa_buffer"].getbuffer())
+                pdf.image("map.png", x=10, w=180); os.remove("map.png")
+            
             pdf.ln(5); pdf.set_font("Arial", 'B', 12); pdf.cell(0, 10, "EXTRAS:", ln=True)
-            for ex in st.session_state["extras_lista"]:
-                pdf.set_font("Arial", '', 10); pdf.cell(0, 8, f"- {ex['local']} | R$ {ex['valor']} | {ex['obs']}", ln=True)
+            for e in st.session_state["extras"]:
+                pdf.set_font("Arial", '', 10); pdf.cell(0, 8, f"- {e['loc']} | R$ {e['val']} | {e['des']}", ln=True)
             
-            st.download_button("📥 Baixar Laudo Completo", data=pdf.output(dest='S').encode('latin-1'), file_name=f"Laudo_{cliente}.pdf")
+            st.download_button("📥 Baixar PDF", data=pdf.output(dest='S').encode('latin-1'), file_name="Laudo_Final.pdf")
