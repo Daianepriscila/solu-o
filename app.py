@@ -20,8 +20,8 @@ if "logado" not in st.session_state:
     st.session_state["logado"] = False
 
 # --- 2. MOTOR DE DESENHO (DXF) ---
-def renderizar_confronto_dxf(v_dxf, c_dxf):
-    fig, ax = plt.subplots(figsize=(14, 8))
+def renderizar_confronto(v_dxf, c_dxf):
+    fig, ax = plt.subplots(figsize=(12, 7))
     def desenhar(file, cor):
         try:
             with open("temp.dxf", "wb") as f:
@@ -30,14 +30,15 @@ def renderizar_confronto_dxf(v_dxf, c_dxf):
             msp = doc.modelspace()
             for e in msp.query('LINE LWPOLYLINE'):
                 if e.dxftype() == 'LINE':
-                    ax.plot([e.dxf.start.x, e.dxf.end.x], [e.dxf.start.y, e.dxf.end.y], color=cor, alpha=0.6, lw=0.7)
+                    ax.plot([e.dxf.start.x, e.dxf.end.x], [e.dxf.start.y, e.dxf.end.y], color=cor, alpha=0.6, lw=0.8)
             os.remove("temp.dxf")
         except: pass
     
     desenhar(v_dxf, 'red')   # Projeto Venda
-    desenhar(c_dxf, 'green') # Técnico/Conferência
+    desenhar(c_dxf, 'green') # Conferência Técnica
     ax.set_aspect('equal')
     plt.axis('off')
+    
     buf = io.BytesIO()
     plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
     buf.seek(0)
@@ -75,11 +76,11 @@ else:
 
     with t1:
         st.header("1. Comparação Visual e Técnica")
-        col1, col2 = st.columns(2)
-        with col1:
+        c1, c2 = st.columns(2)
+        with c1:
             f_v_x = st.file_uploader("XML Venda", type=['xml'], key="vx")
             f_v_d = st.file_uploader("DXF Venda", type=['dxf'], key="vd")
-        with col2:
+        with c2:
             f_c_x = st.file_uploader("XML Técnico", type=['xml'], key="cx")
             f_c_d = st.file_uploader("DXF Técnico", type=['dxf'], key="cd")
 
@@ -94,7 +95,7 @@ else:
                 for e in entrou: st.write(f"- {e}")
         
         if f_v_d and f_c_d:
-            st.image(renderizar_confronto_dxf(f_v_d, f_c_d), caption="Vermelho: Original | Verde: Técnico", use_container_width=True)
+            st.image(renderizar_confronto(f_v_d, f_c_d), caption="Vermelho: Original | Verde: Técnico", use_container_width=True)
 
     with t2:
         st.header("2. Checklist de Engenharia")
