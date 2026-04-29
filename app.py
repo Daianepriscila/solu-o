@@ -4,158 +4,139 @@ from fpdf import FPDF
 from datetime import datetime
 import matplotlib.pyplot as plt
 import io
+import os
 
 # --- CONFIGURAÇÃO MASTER ---
 st.set_page_config(page_title="Amare Italinea - Auditoria Master", layout="wide")
 
-# Registro do tempo de início da conferência
 if "inicio_conferencia" not in st.session_state:
     st.session_state["inicio_conferencia"] = datetime.now()
+if "mapa_gerado" not in st.session_state:
+    st.session_state["mapa_gerado"] = None
 
-# --- FUNÇÃO DE LEITURA E DESENHO TÉCNICO (O CORAÇÃO DO SISTEMA) ---
+# --- FUNÇÃO DE LEITURA E DESENHO ---
 def gerar_visualizacao_tecnica(xml_venda, xml_conf):
     def extrair_pecas(file):
         try:
             tree = ET.parse(file)
             root = tree.getroot()
             pecas = {}
-            # O XML do Promob lista os itens. Vamos pegar descrição, tamanho e posição.
-            for item in root.iter('ITEM'):
+            # Busca recursiva para achar ITENS dentro de qualquer sub-nível
+            for item in root.findall(".//ITEM"):
                 desc = item.get('DESCRIPTION', item.get('Descricao', 'MODULO')).upper()
-                w = float(item.get('WIDTH', 0))
-                h = float(item.get('HEIGHT', 0))
-                d = float(item.get('DEPTH', 0))
-                x = float(item.get('X', 0))
-                y = float(item.get('Y', 0))
-                z = float(item.get('Z', 0))
+                try:
+                    w = float(item.get('WIDTH', 0))
+                    d = float(item.get('DEPTH', 0))
+                    h = float(item.get('HEIGHT', 0))
+                    x = float(item.get('X', 0))
+                    y = float(item.get('Y', 0))
+                    
+                    if w < 20 or d < 20: continue 
 
-                # Filtro para ignorar lixo de sistema (peças menores que 2cm)
-                if w < 20 and d < 20: continue 
-
-                # Chave única baseada na posição X e Y (planta baixa)
-                id_peca = f"{int(x)}_{int(y)}"
-                pecas[id_peca] = {'nome': desc, 'W': w, 'H': h, 'D': d, 'X': x, 'Y': y, 'Z': z, 'vol': w*h*d}
+                    id_peca = f"{desc}_{int(x)}_{int(y)}"
+                    pecas[id_peca] = {'nome': desc, 'W': w, 'D': d, 'H': h, 'X': x, 'Y': y}
+                except (TypeError, ValueError):
+                    continue
             return pecas
-        except: return {}
+        except Exception as e:
+            st.error(f"Erro ao ler XML: {e}")
+            return {}
 
     v_pecas = extrair_pecas(xml_venda)
     c_pecas = extrair_pecas(xml_conf)
 
-    # Criando o gráfico da Planta Baixa
+    if not v_pecas and not c_pecas:
+        return None, ["Erro: Nenhuma peça detectada nos arquivos XML."]
+
     fig, ax = plt.subplots(figsize=(12, 8))
     mudancas_texto = []
 
-    # 1. Desenhar as Paredes da Conferência como Contexto (Cinza)
+    # 1. Paredes/Pisos (Contexto)
     for p in c_pecas.values():
-        if 'PAREDE' in p['nome'] or 'PISO' in p['nome']:
-            rect = plt.Rectangle((p['X'], p['Y']), p['W'], p['D'], color='#EEEEEE', alpha=0.5)
-            ax.add_patch(rect)
+        if any(x in p['nome'] for x in ['PAREDE', 'PISO', 'GEOMETRIA']):
+            ax.add_patch(plt.Rectangle((p['X'], p['Y']), p['W'], p['D'], color='#EEEEEE', alpha=0.5))
 
-    # 2. Lógica de Comparação Colorida
+    # 2. Comparação
     todas_chaves = set(v_pecas.keys()) | set(c_pecas.keys())
     for chave in todas_chaves:
-        v = v_pecas.get(chave)
-        c = c_pecas.get(chave)
+        v, c = v_pecas.get(chave), c_pecas.get(chave)
 
-        # CASO 1: FOI RETIRADO OU DIMINUIU (VERMELHO)
-        if v and (not c or c['vol'] < v['vol']):
-            # Se sumiu ou encolheu, mostramos o tamanho original em Vermelho
-            rect = plt.Rectangle((v['X'], v['Y']), v['W'], v['D'], color='red', alpha=0.6, label='Retirada/Redução')
-            ax.add_patch(rect)
-            mudancas_texto.append(f"🔴 PERDA/REDUÇÃO: {v['nome']} na posição X:{v['X']}")
-
-        # CASO 2: FOI ADICIONADO OU AUMENTOU (VERDE)
-        elif c and (not v or c['vol'] > v['vol']):
-            # Se é novo ou cresceu, mostramos o novo tamanho em Verde
-            rect = plt.Rectangle((c['X'], c['Y']), c['W'], c['D'], color='green', alpha=0.6, label='Adição/Aumento')
-            ax.add_patch(rect)
-            mudancas_texto.append(f"🟢 ADIÇÃO/EXTRA: {c['nome']} na posição X:{c['X']}")
-
-        # CASO 3: SEM ALTERAÇÃO (AZUL CLARO)
+        if v and (not c or (c['W'] * c['D']) < (v['W'] * v['D'])):
+            ax.add_patch(plt.Rectangle((v['X'], v['Y']), v['W'], v['D'], color='red', alpha=0.6))
+            mudancas_texto.append(f"🔴 RETIRADO/REDUZIDO: {v['nome']}")
+        elif c and (not v or (c['W'] * c['D']) > (v['W'] * v['D'])):
+            ax.add_patch(plt.Rectangle((c['X'], c['Y']), c['W'], c['D'], color='green', alpha=0.6))
+            mudancas_texto.append(f"🟢 ADICIONADO/AUMENTADO: {c['nome']}")
         elif c and 'PAREDE' not in c['nome']:
-            rect = plt.Rectangle((c['X'], c['Y']), c['W'], c['D'], fill=False, edgecolor='blue', alpha=0.2)
-            ax.add_patch(rect)
+            ax.add_patch(plt.Rectangle((c['X'], c['Y']), c['W'], c['D'], fill=False, edgecolor='blue', alpha=0.2))
 
-    ax.set_aspect('equal')
     ax.autoscale()
+    ax.set_aspect('equal')
     plt.axis('off')
-    plt.title("MAPA DE AUDITORIA: VERMELHO (Prejuízo/Retirada) | VERDE (Adição/Extra)")
-
+    
     buf = io.BytesIO()
     plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
     buf.seek(0)
+    st.session_state["mapa_gerado"] = buf
     return buf, mudancas_texto
 
 # --- INTERFACE ---
-st.title("🚀 Amare Italinea - Auditoria de Projetos")
+st.title("🛡️ Amare Italinea - Auditoria Master")
 
-tab1, tab2, tab3, tab4 = st.tabs(["📊 Comparativo XML", "🔌 Eletros", "💰 Extras", "🏁 Laudo Final"])
+t1, t2, t3, t4 = st.tabs(["📊 Comparativo XML", "🔌 Eletros", "💰 Extras", "🏁 Finalizar"])
 
-with tab1:
-    st.header("1. Leitura e Confronto de Projetos")
-    col1, col2 = st.columns(2)
-    f_venda = col1.file_uploader("XML Venda (Original)", type=['xml'])
-    f_conf = col2.file_uploader("XML Conferência (Técnico)", type=['xml'])
+with t1:
+    st.header("1. Confronto de Projetos")
+    c1, c2 = st.columns(2)
+    f_venda = c1.file_uploader("XML Venda", type=['xml'])
+    f_conf = c2.file_uploader("XML Conferência", type=['xml'])
     
-    mapa_resultado = None
     if f_venda and f_conf:
-        mapa_resultado, lista_erros = gerar_visualizacao_tecnica(f_venda, f_conf)
-        st.image(mapa_resultado, use_container_width=True)
-        
-        st.subheader("Diferenças lidas no XML:")
-        for erro in lista_erros:
-            if "🔴" in erro: st.error(erro)
-            else: st.success(erro)
+        img, lista = gerar_visualizacao_tecnica(f_venda, f_conf)
+        if img:
+            st.image(img, use_container_width=True)
+            for item in lista: st.write(item)
 
-with tab2:
-    st.header("2. Detalhamento de Eletros (mm)")
-    def input_eletro(label):
-        st.write(f"**{label}**")
-        c1, c2, c3 = st.columns(3)
-        alt = c1.number_input(f"Altura {label}", 0, key=f"a_{label}")
-        larg = c2.number_input(f"Largura {label}", 0, key=f"l_{label}")
-        prof = c3.number_input(f"Profundidade {label}", 0, key=f"p_{label}")
-        return f"{label}: {alt}x{larg}x{prof} mm"
-    
-    e1 = input_eletro("Geladeira")
-    e2 = input_eletro("Forno")
-    e3 = input_eletro("Micro-ondas")
+with t2:
+    st.header("2. Eletros (mm)")
+    def input_e(nome):
+        col1, col2, col3 = st.columns(3)
+        a = col1.number_input(f"Alt {nome}", 0, key=f"a_{nome}")
+        l = col2.number_input(f"Larg {nome}", 0, key=f"l_{nome}")
+        p = col3.number_input(f"Prof {nome}", 0, key=f"p_{nome}")
+        return f"{nome}: {a}x{l}x{p}mm"
+    e_gel = input_e("Geladeira")
+    e_for = input_e("Forno")
 
-with tab3:
-    st.header("3. Controle de Extras")
-    ex_local = st.text_input("Onde comprou o extra?", "N/A")
-    ex_valor = st.number_input("Valor total do extra (R$)", 0.0)
-    ex_desc = st.text_area("Descrição detalhada do extra", value="0")
+with t3:
+    st.header("3. Extras")
+    ex_local = st.text_input("Onde comprou?", "N/A")
+    ex_valor = st.number_input("Valor R$", 0.0)
+    ex_desc = st.text_area("O que é?", "0")
 
-with tab4:
-    st.header("4. Fechamento do Laudo")
-    cliente = st.text_input("Nome do Cliente / Contrato")
-    if st.button("🏁 GERAR PDF E FINALIZAR"):
-        hora_fim = datetime.now()
-        tempo_total = hora_fim - st.session_state["inicio_conferencia"]
-        
+with t4:
+    cliente = st.text_input("Nome do Cliente")
+    if st.button("🏁 GERAR PDF FINAL"):
         pdf = FPDF()
         pdf.add_page()
         pdf.set_font("Arial", 'B', 16)
-        pdf.cell(0, 10, f"LAUDO DE AUDITORIA - {cliente}", ln=True, align='C')
+        pdf.cell(0, 10, f"LAUDO AMARE - {cliente}", ln=True, align='C')
         
         pdf.set_font("Arial", '', 10)
-        pdf.ln(5)
-        pdf.cell(0, 8, f"Início da Conferência: {st.session_state['inicio_conferencia'].strftime('%d/%m/%Y %H:%M:%S')}", ln=True)
-        pdf.cell(0, 8, f"Finalização do Laudo: {hora_fim.strftime('%d/%m/%Y %H:%M:%S')}", ln=True)
+        pdf.cell(0, 8, f"Início: {st.session_state['inicio_conferencia'].strftime('%H:%M:%S')}", ln=True)
+        pdf.cell(0, 8, f"Término: {datetime.now().strftime('%H:%M:%S')}", ln=True)
         
         pdf.ln(5)
-        pdf.set_font("Arial", 'B', 12)
-        pdf.cell(0, 10, "CONTROLE DE EXTRAS:", ln=True)
-        pdf.set_font("Arial", '', 10)
-        pdf.cell(0, 8, f"Local: {ex_local} | Valor: R$ {ex_valor}", ln=True)
+        pdf.cell(0, 8, f"EXTRAS: R$ {ex_valor} ({ex_local})", ln=True)
         pdf.multi_cell(0, 8, f"Descrição: {ex_desc}")
 
-        if mapa_resultado:
-            img_path = "mapa_final.png"
-            with open(img_path, "wb") as f:
-                f.write(mapa_resultado.getvalue())
-            pdf.image(img_path, x=10, w=190)
-            
-        st.success("Laudo concluído! O arquivo PDF agora contém o tempo total e a comparação visual.")
-        st.download_button("📥 BAIXAR PDF", data=pdf.output(dest='S').encode('latin-1'), file_name=f"Laudo_{cliente}.pdf")
+        # ANEXANDO O GRÁFICO NO PDF
+        if st.session_state["mapa_gerado"]:
+            pdf.ln(5)
+            with open("temp_mapa.png", "wb") as f:
+                f.write(st.session_state["mapa_gerado"].getbuffer())
+            pdf.image("temp_mapa.png", x=10, w=190)
+            os.remove("temp_mapa.png")
+
+        pdf_output = pdf.output(dest='S').encode('latin-1')
+        st.download_button("📥 BAIXAR LAUDO", data=pdf_output, file_name=f"Laudo_{cliente}.pdf")
