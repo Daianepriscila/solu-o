@@ -6,137 +6,143 @@ import matplotlib.pyplot as plt
 import io
 import os
 
-# --- CONFIGURAÇÃO MASTER ---
-st.set_page_config(page_title="Amare Italinea - Auditoria Master", layout="wide")
+# --- INÍCIO DA SESSÃO ---
+st.set_page_config(page_title="Amare Italinea - Auditoria 3D", layout="wide")
 
 if "inicio_conferencia" not in st.session_state:
     st.session_state["inicio_conferencia"] = datetime.now()
-if "mapa_gerado" not in st.session_state:
-    st.session_state["mapa_gerado"] = None
+if "mapa_final_buffer" not in st.session_state:
+    st.session_state["mapa_final_buffer"] = None
 
-# --- FUNÇÃO DE LEITURA E DESENHO ---
-def gerar_visualizacao_tecnica(xml_venda, xml_conf):
-    def extrair_pecas(file):
+# --- MOTOR DE RENDERIZAÇÃO TÉCNICA ---
+def renderizar_confronto_xml(xml_venda, xml_conf):
+    def mapear_projeto(file):
         try:
             tree = ET.parse(file)
             root = tree.getroot()
-            pecas = {}
-            # Busca recursiva para achar ITENS dentro de qualquer sub-nível
+            objetos = {}
+            # O Promob armazena em ITEM ou DADOSITEM. Buscamos de forma profunda (.//)
             for item in root.findall(".//ITEM"):
-                desc = item.get('DESCRIPTION', item.get('Descricao', 'MODULO')).upper()
                 try:
+                    desc = item.get('DESCRIPTION', item.get('Descricao', 'MODULO')).upper()
+                    # Dimensões Reais
                     w = float(item.get('WIDTH', 0))
-                    d = float(item.get('DEPTH', 0))
                     h = float(item.get('HEIGHT', 0))
+                    d = float(item.get('DEPTH', 0))
+                    # Posições no Ambiente (Sistema de Coordenadas Promob)
                     x = float(item.get('X', 0))
                     y = float(item.get('Y', 0))
-                    
-                    if w < 20 or d < 20: continue 
+                    z = float(item.get('Z', 0))
 
-                    id_peca = f"{desc}_{int(x)}_{int(y)}"
-                    pecas[id_peca] = {'nome': desc, 'W': w, 'D': d, 'H': h, 'X': x, 'Y': y}
-                except (TypeError, ValueError):
-                    continue
-            return pecas
-        except Exception as e:
-            st.error(f"Erro ao ler XML: {e}")
-            return {}
+                    # Filtro: Ignora itens de sistema (ferragens/tapa-furos) para limpar a imagem
+                    if w < 30 or h < 30: continue 
 
-    v_pecas = extrair_pecas(xml_venda)
-    c_pecas = extrair_pecas(xml_conf)
+                    id_obj = f"{int(x)}_{int(y)}_{int(z)}"
+                    objetos[id_obj] = {'nome': desc, 'W': w, 'H': h, 'D': d, 'X': x, 'Y': y, 'Z': z, 'V': w*h*d}
+                except: continue
+            return objetos
+        except: return {}
 
-    if not v_pecas and not c_pecas:
-        return None, ["Erro: Nenhuma peça detectada nos arquivos XML."]
+    venda = mapear_projeto(xml_venda)
+    conf = mapear_projeto(xml_conf)
 
-    fig, ax = plt.subplots(figsize=(12, 8))
-    mudancas_texto = []
+    # Gerando a Vista Técnica (Elevação Frontal para facilitar leitura)
+    fig, ax = plt.subplots(figsize=(16, 9))
+    dif_texto = []
 
-    # 1. Paredes/Pisos (Contexto)
-    for p in c_pecas.values():
-        if any(x in p['nome'] for x in ['PAREDE', 'PISO', 'GEOMETRIA']):
-            ax.add_patch(plt.Rectangle((p['X'], p['Y']), p['W'], p['D'], color='#EEEEEE', alpha=0.5))
+    # 1. Desenha o "Fantasma" do Projeto Venda (Cinza)
+    for obj in venda.values():
+        ax.add_patch(plt.Rectangle((obj['X'], obj['Z']), obj['W'], obj['H'], color='#CCCCCC', alpha=0.2))
 
-    # 2. Comparação
-    todas_chaves = set(v_pecas.keys()) | set(c_pecas.keys())
-    for chave in todas_chaves:
-        v, c = v_pecas.get(chave), c_pecas.get(chave)
+    # 2. Lógica de Alerta Visual
+    todas_chaves = set(venda.keys()) | set(conf.keys())
+    for k in todas_chaves:
+        v, c = venda.get(k), conf.get(k)
 
-        if v and (not c or (c['W'] * c['D']) < (v['W'] * v['D'])):
-            ax.add_patch(plt.Rectangle((v['X'], v['Y']), v['W'], v['D'], color='red', alpha=0.6))
-            mudancas_texto.append(f"🔴 RETIRADO/REDUZIDO: {v['nome']}")
-        elif c and (not v or (c['W'] * c['D']) > (v['W'] * v['D'])):
-            ax.add_patch(plt.Rectangle((c['X'], c['Y']), c['W'], c['D'], color='green', alpha=0.6))
-            mudancas_texto.append(f"🟢 ADICIONADO/AUMENTADO: {c['nome']}")
-        elif c and 'PAREDE' not in c['nome']:
-            ax.add_patch(plt.Rectangle((c['X'], c['Y']), c['W'], c['D'], fill=False, edgecolor='blue', alpha=0.2))
+        # RETIRADO OU DIMINUÍDO (VERMELHO)
+        if v and (not c or c['V'] < v['V']):
+            ax.add_patch(plt.Rectangle((v['X'], v['Z']), v['W'], v['H'], color='red', alpha=0.8, edgecolor='darkred'))
+            dif_texto.append(f"🔴 MUDANÇA/RETIRADA: {v['nome']}")
+        
+        # ADICIONADO OU AUMENTADO (VERDE)
+        elif c and (not v or c['V'] > v['V']):
+            ax.add_patch(plt.Rectangle((c['X'], c['Z']), c['W'], c['H'], color='green', alpha=0.8, edgecolor='darkgreen'))
+            dif_texto.append(f"🟢 ADIÇÃO/EXTRA: {c['nome']}")
+        
+        # MANTIDO (CONTORNO TÉCNICO)
+        elif c:
+            ax.add_patch(plt.Rectangle((c['X'], c['Z']), c['W'], c['H'], fill=False, edgecolor='blue', alpha=0.3, linestyle='--'))
 
-    ax.autoscale()
     ax.set_aspect('equal')
+    ax.autoscale()
     plt.axis('off')
-    
+    plt.tight_layout()
+
     buf = io.BytesIO()
-    plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+    plt.savefig(buf, format='png', dpi=300)
     buf.seek(0)
-    st.session_state["mapa_gerado"] = buf
-    return buf, mudancas_texto
+    st.session_state["mapa_final_buffer"] = buf
+    return buf, list(set(dif_texto))
 
 # --- INTERFACE ---
 st.title("🛡️ Amare Italinea - Auditoria Master")
 
-t1, t2, t3, t4 = st.tabs(["📊 Comparativo XML", "🔌 Eletros", "💰 Extras", "🏁 Finalizar"])
+tabs = st.tabs(["📊 Comparativo Visual", "🔌 Eletros Reais", "💰 Extras", "🏁 Finalizar Laudo"])
 
-with t1:
-    st.header("1. Confronto de Projetos")
+with tabs[0]:
+    st.subheader("1. Importação de Dados do Promob")
     c1, c2 = st.columns(2)
-    f_venda = c1.file_uploader("XML Venda", type=['xml'])
-    f_conf = c2.file_uploader("XML Conferência", type=['xml'])
+    f_venda = c1.file_uploader("Subir XML Venda (Arquiteto)", type=['xml'])
+    f_conf = c2.file_uploader("Subir XML Conferência (Técnico)", type=['xml'])
     
     if f_venda and f_conf:
-        img, lista = gerar_visualizacao_tecnica(f_venda, f_conf)
-        if img:
-            st.image(img, use_container_width=True)
-            for item in lista: st.write(item)
+        with st.spinner("Renderizando comparação técnica..."):
+            img, alertas = renderizar_confronto_xml(f_venda, f_conf)
+            st.image(img, caption="MAPA DE AUDITORIA: Vermelho (Removido/Menor) | Verde (Adicionado/Maior)", use_container_width=True)
+            for a in alertas:
+                if "🔴" in a: st.error(a)
+                else: st.success(a)
 
-with t2:
-    st.header("2. Eletros (mm)")
-    def input_e(nome):
-        col1, col2, col3 = st.columns(3)
-        a = col1.number_input(f"Alt {nome}", 0, key=f"a_{nome}")
-        l = col2.number_input(f"Larg {nome}", 0, key=f"l_{nome}")
-        p = col3.number_input(f"Prof {nome}", 0, key=f"p_{nome}")
-        return f"{nome}: {a}x{l}x{p}mm"
-    e_gel = input_e("Geladeira")
-    e_for = input_e("Forno")
+with tabs[1]:
+    st.header("2. Memorial de Eletros (Medidas Reais)")
+    def input_e(label):
+        st.write(f"**{label}**")
+        col = st.columns(3)
+        a = col[0].number_input(f"Altura (mm)", 0, key=f"a_{label}")
+        l = col[1].number_input(f"Largura (mm)", 0, key=f"l_{label}")
+        p = col[2].number_input(f"Profundidade (mm)", 0, key=f"p_{label}")
+        return f"{label}: {a}x{l}x{p} mm"
+    e1 = input_e("Geladeira")
+    e2 = input_e("Forno")
 
-with t3:
-    st.header("3. Extras")
-    ex_local = st.text_input("Onde comprou?", "N/A")
-    ex_valor = st.number_input("Valor R$", 0.0)
-    ex_desc = st.text_area("O que é?", "0")
+with tabs[2]:
+    st.header("3. Compras Extras")
+    v_extra = st.number_input("Valor Extra (R$)", 0.0)
+    d_extra = st.text_area("O que foi comprado?", value="0")
 
-with t4:
-    cliente = st.text_input("Nome do Cliente")
-    if st.button("🏁 GERAR PDF FINAL"):
+with tabs[3]:
+    st.header("4. Conclusão")
+    cliente = st.text_input("Nome do Cliente / Contrato")
+    if st.button("🏁 GERAR PDF COMPLETO COM IMAGEM"):
         pdf = FPDF()
         pdf.add_page()
         pdf.set_font("Arial", 'B', 16)
-        pdf.cell(0, 10, f"LAUDO AMARE - {cliente}", ln=True, align='C')
+        pdf.cell(0, 10, f"LAUDO TÉCNICO DE AUDITORIA - {cliente}", ln=True, align='C')
         
         pdf.set_font("Arial", '', 10)
-        pdf.cell(0, 8, f"Início: {st.session_state['inicio_conferencia'].strftime('%H:%M:%S')}", ln=True)
-        pdf.cell(0, 8, f"Término: {datetime.now().strftime('%H:%M:%S')}", ln=True)
+        pdf.cell(0, 8, f"Início da Auditoria: {st.session_state['inicio_conferencia'].strftime('%H:%M:%S')}", ln=True)
+        pdf.cell(0, 8, f"Finalização: {datetime.now().strftime('%H:%M:%S')}", ln=True)
+
+        if st.session_state["mapa_final_buffer"]:
+            pdf.ln(5)
+            # Salva temporariamente para o PDF
+            with open("mapa_temp.png", "wb") as f:
+                f.write(st.session_state["mapa_final_buffer"].getbuffer())
+            pdf.image("mapa_temp.png", x=10, w=190)
+            os.remove("mapa_temp.png")
         
         pdf.ln(5)
-        pdf.cell(0, 8, f"EXTRAS: R$ {ex_valor} ({ex_local})", ln=True)
-        pdf.multi_cell(0, 8, f"Descrição: {ex_desc}")
+        pdf.cell(0, 8, f"EXTRAS: R$ {v_extra}", ln=True)
+        pdf.multi_cell(0, 8, f"DESCRIÇÃO: {d_extra}")
 
-        # ANEXANDO O GRÁFICO NO PDF
-        if st.session_state["mapa_gerado"]:
-            pdf.ln(5)
-            with open("temp_mapa.png", "wb") as f:
-                f.write(st.session_state["mapa_gerado"].getbuffer())
-            pdf.image("temp_mapa.png", x=10, w=190)
-            os.remove("temp_mapa.png")
-
-        pdf_output = pdf.output(dest='S').encode('latin-1')
-        st.download_button("📥 BAIXAR LAUDO", data=pdf_output, file_name=f"Laudo_{cliente}.pdf")
+        st.download_button("📥 BAIXAR LAUDO", data=pdf.output(dest='S').encode('latin-1'), file_name=f"Laudo_{cliente}.pdf")
