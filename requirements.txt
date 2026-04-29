@@ -1,5 +1,5 @@
 streamlit
-fpdf
-matplotlib
+trimesh[all]
 numpy
 ezdxf
+pycollada
