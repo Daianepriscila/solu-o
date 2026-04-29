@@ -7,155 +7,115 @@ import ezdxf
 import io
 import os
 
-# --- 1. CONFIGURAÇÕES E SESSÃO ---
-st.set_page_config(page_title="Amare Italinea - Auditoria Master", layout="wide")
+# --- 1. CONFIGURAÇÕES ---
+st.set_page_config(page_title="Amare Italinea - Auditoria", layout="wide")
 
-if "inicio_conferencia" not in st.session_state:
-    st.session_state["inicio_conferencia"] = datetime.now()
-if "lista_extras" not in st.session_state:
-    st.session_state["lista_extras"] = []
-if "mapa_dxf_buffer" not in st.session_state:
-    st.session_state["mapa_dxf_buffer"] = None
-if "logado" not in st.session_state:
-    st.session_state["logado"] = False
+if "inicio" not in st.session_state: st.session_state["inicio"] = datetime.now()
+if "extras" not in st.session_state: st.session_state["extras"] = []
+if "mapa" not in st.session_state: st.session_state["mapa"] = None
+if "logado" not in st.session_state: st.session_state["logado"] = False
 
-# --- 2. MOTOR DE DESENHO (DXF) ---
-def renderizar_confronto(v_dxf, c_dxf):
-    fig, ax = plt.subplots(figsize=(12, 7))
-    def desenhar(file, cor):
+# --- 2. MOTOR VISUAL (Simplificado para Grandes Ambientes) ---
+def gerar_mapa(v_dxf, c_dxf):
+    fig, ax = plt.subplots(figsize=(16, 8))
+    def desenhar(file, cor, peso):
         try:
-            with open("temp.dxf", "wb") as f:
-                f.write(file.getbuffer())
-            doc = ezdxf.readfile("temp.dxf")
+            with open("t.dxf", "wb") as f: f.write(file.getbuffer())
+            doc = ezdxf.readfile("t.dxf")
             msp = doc.modelspace()
             for e in msp.query('LINE LWPOLYLINE'):
                 if e.dxftype() == 'LINE':
-                    ax.plot([e.dxf.start.x, e.dxf.end.x], [e.dxf.start.y, e.dxf.end.y], color=cor, alpha=0.6, lw=0.8)
-            os.remove("temp.dxf")
+                    # Simplificação: ignora linhas muito curtas (detalhes irrelevantes)
+                    if e.dxf.start.distance(e.dxf.end) > 50:
+                        ax.plot([e.dxf.start.x, e.dxf.end.x], [e.dxf.start.y, e.dxf.end.y], color=cor, alpha=0.5, lw=peso)
+            os.remove("t.dxf")
         except: pass
-    
-    desenhar(v_dxf, 'red')   # Projeto Venda
-    desenhar(c_dxf, 'green') # Conferência Técnica
+
+    desenhar(v_dxf, 'red', 1.0)   # Projeto Venda
+    desenhar(c_dxf, 'green', 0.8) # Conferência
     ax.set_aspect('equal')
     plt.axis('off')
     
     buf = io.BytesIO()
-    plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
-    buf.seek(0)
-    st.session_state["mapa_dxf_buffer"] = buf
+    plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+    st.session_state["mapa"] = buf
     return buf
 
-# --- 3. MOTOR DE LISTA (XML) ---
-def comparar_xmls(f_v_x, f_c_x):
-    def extrair(file):
-        try:
-            tree = ET.parse(file)
-            root = tree.getroot()
-            return [item.get('DESCRIPTION', 'MODULO').upper() for item in root.findall(".//ITEM") if float(item.get('WIDTH', 0)) > 50]
-        except: return []
-    v, c = extrair(f_v_x), extrair(f_c_x)
-    saiu = [i for i in v if i not in c]
-    entrou = [i for i in c if i not in v]
-    return saiu, entrou
-
-# --- 4. LOGIN ---
-USUARIOS = {"admin": "adminamare", "michel_conferente": "italinea123"}
+# --- 3. LOGIN ---
+USUARIOS = {"admin": "adminamare", "michel": "italinea123"}
 if not st.session_state["logado"]:
-    st.title("🛡️ Login Amare Italinea")
+    st.title("🛡️ Login Amare")
     u = st.sidebar.text_input("Usuário").lower()
     p = st.sidebar.text_input("Senha", type="password")
     if st.sidebar.button("Entrar"):
         if u in USUARIOS and USUARIOS[u] == p:
             st.session_state["logado"] = True
             st.rerun()
-        else: st.sidebar.error("Acesso Negado")
 else:
-    # --- 5. INTERFACE ---
-    st.title("👷 Portal de Auditoria Master Amare")
-    t1, t2, t3, t4, t5 = st.tabs(["📊 Confronto XML/DXF", "🏠 Checklist", "🔌 Memorial Eletros", "💰 Extras", "🏁 Finalizar"])
+    # --- 4. INTERFACE ---
+    st.title("👷 Auditoria Master Amare")
+    t1, t2, t3, t4, t5 = st.tabs(["📊 Arquivos", "🏠 Checklist", "🔌 Eletros", "💰 Extras", "🏁 Finalizar"])
 
     with t1:
-        st.header("1. Comparação Visual e Técnica")
+        st.header("1. Comparação XML/DXF")
         c1, c2 = st.columns(2)
-        with c1:
-            f_v_x = st.file_uploader("XML Venda", type=['xml'], key="vx")
-            f_v_d = st.file_uploader("DXF Venda", type=['dxf'], key="vd")
-        with c2:
-            f_c_x = st.file_uploader("XML Técnico", type=['xml'], key="cx")
-            f_c_d = st.file_uploader("DXF Técnico", type=['dxf'], key="cd")
+        v_xml = c1.file_uploader("XML Venda", type=['xml'], key="vx")
+        v_dxf = c1.file_uploader("DXF Venda", type=['dxf'], key="vd")
+        c_xml = c2.file_uploader("XML Técnico", type=['xml'], key="cx")
+        c_dxf = c2.file_uploader("DXF Técnico", type=['dxf'], key="cd")
 
-        if f_v_x and f_c_x:
-            saiu, entrou = comparar_xmls(f_v_x, f_c_x)
-            cs, ce = st.columns(2)
-            with cs:
-                st.error("🔴 ITENS RETIRADOS")
-                for s in saiu: st.write(f"- {s}")
-            with ce:
-                st.success("🟢 ITENS ADICIONADOS")
-                for e in entrou: st.write(f"- {e}")
-        
-        if f_v_d and f_c_d:
-            st.image(renderizar_confronto(f_v_d, f_c_d), caption="Vermelho: Original | Verde: Técnico", use_container_width=True)
+        if v_dxf and c_dxf:
+            st.image(gerar_mapa(v_dxf, c_dxf), use_container_width=True)
 
     with t2:
-        st.header("2. Checklist de Engenharia")
+        st.header("2. Checklist")
         colA, colB = st.columns(2)
         with colA:
-            st.subheader("💧 Hidráulica, Gás e Civil")
-            st.checkbox("Caixa de gordura permite abertura?"); st.checkbox("Registros e Sifão recuados?")
-            st.checkbox("Gás está acessível?"); st.checkbox("Paredes com prumo/esquadro?")
+            h1 = st.checkbox("Caixa de gordura/Sifão ok?"); h2 = st.checkbox("Ponto de Gás ok?")
         with colB:
-            st.subheader("⚡ Elétrica e Medição")
-            st.checkbox("Ponto energia coifa no local?"); st.checkbox("Tomadas bancada respeitam 110cm?")
-            st.checkbox("Pé-direito (3 pontos)?"); st.checkbox("Desconto granitos aplicado?")
+            e1 = st.checkbox("Elétrica bancada ok?"); m1 = st.checkbox("Pé-direito ok?")
 
     with t3:
-        st.header("3. Memorial de Eletros (mm)")
+        st.header("3. Memorial Eletros (mm)")
         st.write("**Geladeira**")
-        c1a, c1b, c1c = st.columns(3)
-        gel_a = c1a.number_input("Altura Geladeira", 0, key="alt_gel")
-        gel_l = c1b.number_input("Largura Geladeira", 0, key="lar_gel")
-        gel_p = c1c.number_input("Profundidade Geladeira", 0, key="pro_gel")
-        
+        ca, cb, cc = st.columns(3)
+        ga = ca.number_input("Alt", 0, key="ga"); gl = cb.number_input("Larg", 0, key="gl"); gp = cc.number_input("Prof", 0, key="gp")
         st.write("**Forno**")
-        c2a, c2b, c2c = st.columns(3)
-        for_a = c2a.number_input("Altura Forno", 0, key="alt_for")
-        for_l = c2b.number_input("Largura Forno", 0, key="lar_for")
-        for_p = c2c.number_input("Profundidade Forno", 0, key="pro_for")
+        cd, ce, cf = st.columns(3)
+        fa = cd.number_input("Alt ", 0, key="fa"); fl = ce.number_input("Larg ", 0, key="fl"); fp = cf.number_input("Prof ", 0, key="fp")
 
     with t4:
         st.header("4. Custos Extras")
-        if st.button("➕ Adicionar Novo Item Extra"):
-            st.session_state["lista_extras"].append({"local": "", "valor": 0.0, "desc": ""})
+        if st.button("➕ Adicionar Novo Extra"):
+            st.session_state["extras"].append({"loc": "", "val": 0.0, "des": "0"})
             st.rerun()
         
-        for i, item in enumerate(st.session_state["lista_extras"]):
-            st.markdown(f"--- Registro {i+1}")
-            ce = st.columns(2)
-            st.session_state["lista_extras"][i]["local"] = ce.text_input(f"Onde comprou? {i}", key=f"loc_{i}")
-            st.session_state["lista_extras"][i]["valor"] = ce.number_input(f"Valor R$ {i}", 0.0, key=f"val_{i}")
-            st.session_state["lista_extras"][i]["desc"] = st.text_area(f"O que foi comprado? {i}", value="0", key=f"des_{i}")
+        for i, ex in enumerate(st.session_state["extras"]):
+            st.markdown(f"--- Item {i+1}")
+            ce1, ce2 = st.columns(2)
+            st.session_state["extras"][i]["loc"] = ce1.text_input(f"Onde?", key=f"l_{i}")
+            st.session_state["extras"][i]["val"] = ce2.number_input(f"R$", 0.0, key=f"v_{i}")
+            st.session_state["extras"][i]["des"] = st.text_area(f"O que?", key=f"d_{i}")
 
     with t5:
-        st.header("5. Finalizar Auditoria")
-        cliente = st.text_input("Nome do Cliente / Contrato")
-        if st.button("🏁 GERAR PDF FINAL"):
-            hora_fim = datetime.now()
-            tempo = hora_fim - st.session_state["inicio_conferencia"]
+        st.header("5. Gerar Laudo")
+        cliente = st.text_input("Nome do Cliente")
+        if st.button("🏁 BAIXAR PDF FINAL"):
+            fim = datetime.now()
+            tempo = fim - st.session_state["inicio"]
             pdf = FPDF()
             pdf.add_page()
             pdf.set_font("Arial", 'B', 16); pdf.cell(0, 10, f"LAUDO AMARE - {cliente}", ln=True, align='C')
             pdf.set_font("Arial", '', 10)
-            pdf.cell(0, 8, f"Início: {st.session_state['inicio_conferencia'].strftime('%d/%m %H:%M')}", ln=True)
-            pdf.cell(0, 8, f"Final: {hora_fim.strftime('%d/%m %H:%M')} (Duração: {str(tempo).split('.')})", ln=True)
+            pdf.cell(0, 8, f"Início: {st.session_state['inicio'].strftime('%d/%m %H:%M')} | Fim: {fim.strftime('%H:%M')}", ln=True)
+            pdf.cell(0, 8, f"Tempo total: {str(tempo).split('.')[0]}", ln=True)
 
-            if st.session_state["mapa_dxf_buffer"]:
-                pdf.ln(5)
-                with open("mapa_tmp.png", "wb") as f: f.write(st.session_state["mapa_dxf_buffer"].getbuffer())
-                pdf.image("mapa_tmp.png", x=10, w=180); os.remove("mapa_tmp.png")
+            if st.session_state["mapa"]:
+                with open("m.png", "wb") as f: f.write(st.session_state["mapa"].getbuffer())
+                pdf.image("m.png", x=10, w=180); os.remove("m.png")
             
             pdf.ln(5); pdf.set_font("Arial", 'B', 12); pdf.cell(0, 10, "EXTRAS:", ln=True)
-            for ex in st.session_state["lista_extras"]:
-                pdf.set_font("Arial", '', 10); pdf.cell(0, 8, f"- {ex['local']} | R$ {ex['valor']} | {ex['desc']}", ln=True)
+            for e in st.session_state["extras"]:
+                pdf.set_font("Arial", '', 10); pdf.cell(0, 8, f"- {e['loc']} | R$ {e['val']} | {e['des']}", ln=True)
             
-            st.download_button("📥 BAIXAR LAUDO COMPLETO", data=pdf.output(dest='S').encode('latin-1'), file_name=f"Laudo_{cliente}.pdf")
+            st.download_button("📥 Clique aqui para baixar", data=pdf.output(dest='S').encode('latin-1'), file_name=f"Laudo_{cliente}.pdf")
