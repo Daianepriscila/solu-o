@@ -2,3 +2,4 @@ streamlit
 fpdf
 matplotlib
 numpy
+ezdxf
