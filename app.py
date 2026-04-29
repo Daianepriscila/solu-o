@@ -6,134 +6,162 @@ import matplotlib.pyplot as plt
 import io
 import os
 
-# --- INICIALIZAÇÃO ---
+# --- INICIALIZAÇÃO DE SESSÃO ---
 if "inicio_conferencia" not in st.session_state:
     st.session_state["inicio_conferencia"] = datetime.now()
 if "lista_extras" not in st.session_state:
     st.session_state["lista_extras"] = []
-if "mapa_img_final" not in st.session_state:
-    st.session_state["mapa_img_final"] = None
+if "mapa_img_buffer" not in st.session_state:
+    st.session_state["mapa_img_buffer"] = None
 if "logado" not in st.session_state:
     st.session_state["logado"] = False
 
+# --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Amare Italinea - Auditoria Master", layout="wide")
 
 # --- LOGIN ---
-USUARIOS = {"admin": "adminamare", "michel_conferente": "italinea123", "douglas_conferente": "italinea456"}
+USUARIOS = {"admin": "adminamare", "michel_conferente": "italinea123"}
 
-if not st.session_state["logado"]:
-    st.title("🛡️ Login Amare Italinea")
-    u = st.sidebar.text_input("Usuário")
-    p = st.sidebar.text_input("Senha", type="password")
-    if st.sidebar.button("Entrar"):
-        if u in USUARIOS and USUARIOS[u] == p:
-            st.session_state["logado"] = True
-            st.rerun()
-        else: st.sidebar.error("Acesso Negado")
-else:
+def realizar_login():
+    if not st.session_state["logado"]:
+        st.title("🛡️ Amare Italinea - Login")
+        u = st.sidebar.text_input("Usuário")
+        p = st.sidebar.text_input("Senha", type="password")
+        if st.sidebar.button("Entrar"):
+            if u in USUARIOS and USUARIOS[u] == p:
+                st.session_state["logado"] = True
+                st.rerun()
+            else:
+                st.sidebar.error("Credenciais inválidas.")
+        return False
+    return True
+
+# --- MOTOR DE DESENHO E COMPARAÇÃO XML ---
+def processar_xmls(xml_venda, xml_conf):
+    def extrair_geometria(file):
+        try:
+            tree = ET.parse(file)
+            root = tree.getroot()
+            itens = {}
+            for item in root.findall(".//ITEM"):
+                desc = item.get('DESCRIPTION', item.get('Description', 'MODULO')).upper()
+                try:
+                    w = float(item.get('WIDTH', 0))
+                    h = float(item.get('HEIGHT', 0))
+                    d = float(item.get('DEPTH', 0))
+                    x = float(item.get('X', item.get('ABSCISSA', 0)))
+                    z = float(item.get('Z', item.get('COTA', 0)))
+                    if w < 50 or h < 50: continue 
+                    id_peca = f"{desc}_{int(x)}_{int(z)}"
+                    itens[id_peca] = {'nome': desc, 'W': w, 'H': h, 'D': d, 'X': x, 'Z': z, 'V': w*h*d}
+                except: continue
+            return itens
+        except: return {}
+
+    venda = extrair_geometria(xml_venda)
+    conf = extrair_geometria(xml_conf)
+
+    fig, ax = plt.subplots(figsize=(14, 7))
+    alertas = []
+
+    for p in venda.values():
+        ax.add_patch(plt.Rectangle((p['X'], p['Z']), p['W'], p['H'], color='gray', alpha=0.1))
+
+    todas_chaves = set(venda.keys()) | set(conf.keys())
+    for k in todas_chaves:
+        v, c = venda.get(k), conf.get(k)
+        if v and (not c or c['V'] < v['V']):
+            ax.add_patch(plt.Rectangle((v['X'], v['Z']), v['W'], v['H'], color='red', alpha=0.6))
+            alertas.append(f"🔴 RETIRADO/REDUZIDO: {v['nome']}")
+        elif c and (not v or c['V'] > v['V']):
+            ax.add_patch(plt.Rectangle((c['X'], c['Z']), c['W'], c['H'], color='green', alpha=0.6))
+            alertas.append(f"🟢 ADICIONADO/AUMENTADO: {c['nome']}")
+        elif c:
+            ax.add_patch(plt.Rectangle((c['X'], c['Z']), c['W'], c['H'], fill=False, edgecolor='blue', alpha=0.2))
+
+    ax.autoscale()
+    ax.set_aspect('equal')
+    plt.axis('off')
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+    buf.seek(0)
+    st.session_state["mapa_img_buffer"] = buf
+    return buf, list(set(alertas))
+
+# --- INTERFACE ---
+if realizar_login():
     st.title("👷 Portal de Auditoria Técnica Amare")
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Mapa XML", "🏠 Checklist", "🔌 Eletros 3D", "💰 Extras", "🏁 Finalizar"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Mapa XML", "🏠 Checklist", "🔌 Memorial Eletros", "💰 Custos Extras", "🏁 Finalizar"])
 
     with tab1:
         st.header("1. Confronto de Projetos (Venda vs Técnico)")
         c1, c2 = st.columns(2)
-        f_v = c1.file_uploader("XML Projeto Venda", type=['xml'], key="v_xml")
-        f_c = c2.file_uploader("XML Conferência Técnica", type=['xml'], key="c_xml")
-        
+        f_v = c1.file_uploader("Subir XML Venda", type=['xml'], key="v_xml")
+        f_c = c2.file_uploader("Subir XML Conferência", type=['xml'], key="c_xml")
         if f_v and f_c:
-            def extrair(file):
-                try:
-                    tree = ET.parse(file)
-                    root = tree.getroot()
-                    itens = {}
-                    for item in root.findall(".//ITEM"):
-                        try:
-                            w = float(item.get('WIDTH', 0))
-                            h = float(item.get('HEIGHT', 0))
-                            d = float(item.get('DEPTH', 0))
-                            x = float(item.get('X', item.get('ABSCISSA', 0)))
-                            z = float(item.get('Z', item.get('COTA', 0)))
-                            if w < 50 or h < 50: continue # Filtra ferragens
-                            desc = item.get('DESCRIPTION', 'MODULO').upper()
-                            id_p = f"{int(x)}_{int(z)}"
-                            itens[id_p] = {'nome': desc, 'W': w, 'H': h, 'X': x, 'Z': z, 'V': w*h*d}
-                        except: continue
-                    return itens
-                except: return {}
-
-            venda, conf = extrair(f_v), extrair(f_c)
-            fig, ax = plt.subplots(figsize=(14, 7))
-            alertas = []
-
-            for p in venda.values():
-                ax.add_patch(plt.Rectangle((p['X'], p['Z']), p['W'], p['H'], color='gray', alpha=0.1))
-
-            todas = set(venda.keys()) | set(conf.keys())
-            for k in todas:
-                v, c = venda.get(k), conf.get(k)
-                if v and (not c or c['V'] < v['V']):
-                    ax.add_patch(plt.Rectangle((v['X'], v['Z']), v['W'], v['H'], color='red', alpha=0.7))
-                    alertas.append(f"🔴 RETIRADO/REDUZIDO: {v['nome']}")
-                elif c and (not v or c['V'] > v['V']):
-                    ax.add_patch(plt.Rectangle((c['X'], c['Z']), c['W'], c['H'], color='green', alpha=0.7))
-                    alertas.append(f"🟢 ADIÇÃO/AUMENTO: {c['nome']}")
-
-            ax.autoscale(); ax.set_aspect('equal'); plt.axis('off')
-            buf = io.BytesIO()
-            plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
-            st.session_state["mapa_img_final"] = buf
-            st.image(buf, use_container_width=True)
-            for a in list(set(alertas)): st.write(a)
+            img, erros = processar_xmls(f_v, f_c)
+            st.image(img, use_container_width=True)
+            for e in erros:
+                if "🔴" in e: st.error(e)
+                else: st.success(e)
 
     with tab2:
         st.header("2. Checklist de Engenharia")
-        clA, clB = st.columns(2)
-        with clA:
-            st.subheader("💧 Hidráulica e Civil")
-            st.checkbox("Caixa de gordura permite abertura?"); st.checkbox("Registros e Sifão recuados?")
-            st.checkbox("Paredes possuem prumo/esquadro?"); st.checkbox("Gás está acessível?")
-        with clB:
-            st.subheader("⚡ Elétrica e Medição")
+        colA, colB = st.columns(2)
+        with colA:
+            st.subheader("💧 Hidráulica e Gás")
+            st.checkbox("Caixa de gordura permite abertura do balcão?"); st.checkbox("Registros e Sifão recuados?")
+            st.checkbox("Gás está acessível e seguro?")
+            st.subheader("🧱 Civil e Alvenaria")
+            st.checkbox("Paredes possuem prumo e esquadro?"); st.checkbox("Drywall possui reforço de madeira?")
+        with colB:
+            st.subheader("⚡ Elétrica")
             st.checkbox("Ponto de energia coifa no local?"); st.checkbox("Tomadas bancada respeitam 110cm?")
+            st.subheader("📐 Medições")
             st.checkbox("Pé-direito medido em 3 pontos?"); st.checkbox("Desconto de granitos aplicado?")
 
     with tab3:
         st.header("3. Memorial de Eletros (mm)")
-        def in_e(n, r):
-            st.write(f"**{n}**")
-            c = st.columns(3)
-            a = c.number_input(f"Alt", 0, key=f"a_{r}")
-            l = c.number_input(f"Larg", 0, key=f"l_{r}")
-            p = c.number_input(f"Prof", 0, key=f"p_{r}")
-            return f"{n}: {a}x{l}x{p}mm"
-        e1, e2, e3 = in_e("Geladeira", "g"), in_e("Forno", "f"), in_e("Micro-ondas", "m")
+        def input_e(nome, ref):
+            st.write(f"**{nome}**")
+            cl = st.columns(3)
+            alt = cl[0].number_input(f"Alt {nome}", 0, key=f"a_{ref}")
+            lar = cl[1].number_input(f"Larg {nome}", 0, key=f"l_{ref}")
+            pro = cl[2].number_input(f"Prof {nome}", 0, key=f"p_{ref}")
+            return f"{nome}: {alt}x{lar}x{pro} mm"
+        
+        e_gel = input_e("Geladeira", "gel")
+        e_for = input_e("Forno", "for")
+        e_mic = input_e("Micro-ondas", "mic")
 
     with tab4:
         st.header("4. Custos Extras")
         if st.button("➕ Adicionar Novo Item Extra"):
             st.session_state["lista_extras"].append({"local": "", "valor": 0.0, "desc": ""})
+        
         for i, item in enumerate(st.session_state["lista_extras"]):
             st.markdown(f"--- Extra {i+1}")
             ce = st.columns(2)
-            st.session_state["lista_extras"][i]["local"] = ce[0].text_input(f"Local {i}", key=f"lo_{i}")
-            st.session_state["lista_extras"][i]["valor"] = ce[1].number_input(f"Valor {i}", 0.0, key=f"va_{i}")
-            st.session_state["lista_extras"][i]["desc"] = st.text_area(f"Descrição {i}", value="0", key=f"de_{i}")
+            st.session_state["lista_extras"][i]["local"] = ce[0].text_input(f"Onde comprou? {i}", key=f"loc_{i}")
+            st.session_state["lista_extras"][i]["valor"] = ce[1].number_input(f"Valor R$ {i}", 0.0, key=f"val_{i}")
+            st.session_state["lista_extras"][i]["desc"] = st.text_area(f"O que é? {i}", value="0", key=f"des_{i}")
 
     with tab5:
         st.header("5. Fechamento")
         cliente = st.text_input("Nome do Cliente")
-        foto_ref = st.file_uploader("Anexar Foto da Medida Final", type=['jpg', 'jpeg', 'png'])
         if st.button("🏁 GERAR PDF FINAL"):
             pdf = FPDF()
-            pdf.add_page(); pdf.set_font("Arial", 'B', 16); pdf.cell(0, 10, f"LAUDO AMARE - {cliente}", ln=True, align='C')
+            pdf.add_page()
+            pdf.set_font("Arial", 'B', 16); pdf.cell(0, 10, f"LAUDO AMARE - {cliente}", ln=True, align='C')
             pdf.set_font("Arial", '', 10); pdf.cell(0, 8, f"Início: {st.session_state['inicio_conferencia'].strftime('%d/%m/%Y %H:%M')}", ln=True)
-            if st.session_state["mapa_img_final"]:
-                with open("m.png", "wb") as f: f.write(st.session_state["mapa_img_final"].getbuffer())
-                pdf.image("m.png", x=10, w=190); os.remove("m.png")
-            if foto_ref:
-                with open("f.png", "wb") as f: f.write(foto_ref.getbuffer())
-                pdf.image("f.png", x=10, w=100); os.remove("f.png")
-            pdf.ln(5); pdf.set_font("Arial", 'B', 12); pdf.cell(0, 10, "EXTRAS:", ln=True)
+            
+            if st.session_state["mapa_img_buffer"]:
+                pdf.ln(5)
+                with open("tmp.png", "wb") as f: f.write(st.session_state["mapa_img_buffer"].getbuffer())
+                pdf.image("tmp.png", x=10, w=180); os.remove("tmp.png")
+            
+            pdf.ln(5); pdf.set_font("Arial", 'B', 12); pdf.cell(0, 10, "RESUMO DE EXTRAS:", ln=True)
             for ex in st.session_state["lista_extras"]:
                 pdf.set_font("Arial", '', 10); pdf.cell(0, 8, f"- {ex['local']} | R$ {ex['valor']} | {ex['desc']}", ln=True)
+            
             st.download_button("📥 BAIXAR PDF", data=pdf.output(dest='S').encode('latin-1'), file_name=f"Laudo_{cliente}.pdf")
